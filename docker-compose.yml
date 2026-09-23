@@ -1,0 +1,14 @@
+services:
+  share-otomatis:
+    build: .
+    container_name: share-otomatis-wa
+    restart: always
+    ports:
+      - "3005:3000"
+    volumes:
+      # Persistent storage for WA session and uploads
+      - ./data:/app/data
+      - ./.baileys_auth:/app/.baileys_auth
+    environment:
+      - NODE_ENV=production
+      - PORT=3000

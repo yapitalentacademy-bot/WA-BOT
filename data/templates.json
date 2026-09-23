@@ -1,0 +1,23 @@
+[
+  {
+    "id": "t-1",
+    "title": "Pengumuman Jadwal Kegiatan / Acara",
+    "content": "Halo {nama},\n\nBerikut kami sampaikan jadwal kegiatan terbaru untuk Anda:\n📅 *Jadwal*: {jadwal}\n⏰ *Waktu*: {waktu}\n📍 *Keterangan*: {kegiatan}\n\nFile dokumen jadwal terlampir pada pesan ini. Silakan dicek dan disimpan.\n\nTerima kasih! 🙏",
+    "category": "Jadwal",
+    "createdAt": "2026-09-23T17:37:52.549Z"
+  },
+  {
+    "id": "t-2",
+    "title": "Pengingat (Reminder) Jadwal Rapat / Kuliah",
+    "content": "Halo {nama}, mengingatkan kembali bahwa jadwal rapat/kegiatan Anda akan dimulai pada {waktu}.\n\nMohon hadir tepat waktu. Terima kasih!",
+    "category": "Reminder",
+    "createdAt": "2026-09-23T17:37:52.550Z"
+  },
+  {
+    "id": "t-3",
+    "title": "Share Flyer & Dokumen Panduan",
+    "content": "Halo {nama}!\n\nBerikut kami bagikan flyer jadwal beserta panduan kegiatan resmi untuk Anda. Dokumen selengkapnya bisa langsung Anda buka pada lampiran file di bawah.\n\nSalam sukses! ✨",
+    "category": "Dokumen",
+    "createdAt": "2026-09-23T17:37:52.550Z"
+  }
+]

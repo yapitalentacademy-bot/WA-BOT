@@ -1,0 +1,44 @@
+[
+  {
+    "id": "sch-1790185110484",
+    "title": "Share Dokumen Jadwal Resmi",
+    "message": "Halo {nama}, berikut file dokumen jadwal resmi Anda. Silakan dicek terlampir!",
+    "attachedFile": {
+      "id": "file-1790185110383",
+      "name": "1790185110381_Jadwal_Kegiatan_Resmi.pdf",
+      "originalName": "Jadwal_Kegiatan_Resmi.pdf",
+      "size": 40,
+      "mimeType": "application/pdf",
+      "url": "/api/files/1790185110381_Jadwal_Kegiatan_Resmi.pdf",
+      "localPath": "C:\\M.KHOLID SYAIFULLOH\\KHOLID\\Share Otomatis\\data\\uploads\\1790185110381_Jadwal_Kegiatan_Resmi.pdf",
+      "uploadedAt": "2026-09-23T17:38:30.384Z"
+    },
+    "recipients": {
+      "type": "all"
+    },
+    "scheduleType": "weekly",
+    "scheduledTime": "2026-09-23T17:38:30.485Z",
+    "recurringTime": "07:30",
+    "recurringDay": 1,
+    "status": "active",
+    "antiBanDelayMin": 3,
+    "antiBanDelayMax": 7,
+    "createdAt": "2026-09-23T17:38:30.485Z"
+  },
+  {
+    "id": "sch-1790185077384",
+    "title": "Jadwal Kajian Subuh",
+    "message": "Halo {nama}, berikut jadwal {kegiatan} Anda pada {waktu}.",
+    "attachedFile": null,
+    "recipients": {
+      "type": "all"
+    },
+    "scheduleType": "daily",
+    "scheduledTime": "2026-09-23T17:37:57.384Z",
+    "recurringTime": "05:00",
+    "status": "active",
+    "antiBanDelayMin": 3,
+    "antiBanDelayMax": 7,
+    "createdAt": "2026-09-23T17:37:57.384Z"
+  }
+]
