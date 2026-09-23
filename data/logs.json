@@ -1,5 +1,37 @@
 [
   {
+    "id": "log-1790188706137",
+    "scheduleTitle": "Uji Coba Kirim (Test Send)",
+    "recipientPhone": "089654616685",
+    "recipientName": "Tes Pengiriman",
+    "messageText": "Tes verifikasi logging JID: 01.38.25",
+    "hasAttachment": false,
+    "status": "success",
+    "sentAt": "2026-09-23T18:38:26.137Z"
+  },
+  {
+    "id": "log-1790188619887",
+    "scheduleTitle": "Uji Coba Kirim (Test Send)",
+    "recipientPhone": "089654616685",
+    "recipientName": "Tes Pengiriman",
+    "messageText": "Tes verifikasi sistem: 01.36.50",
+    "hasAttachment": false,
+    "status": "success",
+    "sentAt": "2026-09-23T18:36:59.887Z"
+  },
+  {
+    "id": "log-1790188370485-6hvsc",
+    "scheduleId": "instant-1790188370373",
+    "scheduleTitle": "Broadcast Langsung",
+    "recipientPhone": "6281234567890",
+    "recipientName": "Contoh Kontak Siswa/Peserta",
+    "messageText": "hi",
+    "hasAttachment": true,
+    "attachmentName": "Jadwal_Kegiatan_Resmi.pdf",
+    "status": "success",
+    "sentAt": "2026-09-23T18:32:50.485Z"
+  },
+  {
     "id": "log-1790186706573",
     "scheduleTitle": "Uji Coba Kirim (Test Send)",
     "recipientPhone": "089654616685",

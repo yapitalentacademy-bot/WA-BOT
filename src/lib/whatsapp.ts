@@ -211,14 +211,42 @@ export async function initWhatsApp(force = false): Promise<void> {
   }
 }
 
+// Resolve destination JID (checking onWhatsApp for phone numbers)
+export async function resolveWhatsAppJid(target: string): Promise<string> {
+  const formatted = formatToWhatsAppJid(target);
+  if (formatted.endsWith('@g.us')) {
+    return formatted;
+  }
+
+  if (state.socket) {
+    try {
+      const clean = formatted.replace('@s.whatsapp.net', '');
+      const results = await state.socket.onWhatsApp(clean);
+      const check = results?.[0];
+      if (check && check.exists && check.jid) {
+        console.log(`[WA JID] Verified +${clean} on WhatsApp: ${check.jid}`);
+        return check.jid;
+      } else {
+        console.warn(`[WA JID] Warning: +${clean} may not be registered on WhatsApp`);
+      }
+    } catch (e) {
+      console.warn('[WA JID] onWhatsApp check skipped/failed:', e);
+    }
+  }
+  return formatted;
+}
+
 // Send Text Message
 export async function sendWhatsAppText(toPhone: string, text: string): Promise<any> {
   if (!state.socket || state.status !== 'connected') {
     throw new Error('WhatsApp belum terhubung. Silakan hubungkan terlebih dahulu di dashboard.');
   }
 
-  const jid = formatToWhatsAppJid(toPhone);
-  return await state.socket.sendMessage(jid, { text });
+  const jid = await resolveWhatsAppJid(toPhone);
+  console.log(`[WA SEND] Mengirim pesan teks ke JID: ${jid}`);
+  const result = await state.socket.sendMessage(jid, { text });
+  console.log(`[WA SEND] Pesan berhasil dikirim. Key ID: ${result?.key?.id}`);
+  return result;
 }
 
 // Send File / Media / Document with optional caption
@@ -238,39 +266,44 @@ export async function sendWhatsAppFile(
   }
 
   const fileBuffer = fs.readFileSync(filePath);
-  const jid = formatToWhatsAppJid(toPhone);
+  const jid = await resolveWhatsAppJid(toPhone);
+  console.log(`[WA SEND] Mengirim file "${fileName}" (${mimeType}) ke JID: ${jid}`);
 
   const isImage = mimeType.startsWith('image/');
   const isVideo = mimeType.startsWith('video/');
   const isAudio = mimeType.startsWith('audio/');
 
+  let result;
   if (isImage) {
-    return await state.socket.sendMessage(jid, {
+    result = await state.socket.sendMessage(jid, {
       image: fileBuffer,
       caption: caption || undefined,
       fileName,
     });
   } else if (isVideo) {
-    return await state.socket.sendMessage(jid, {
+    result = await state.socket.sendMessage(jid, {
       video: fileBuffer,
       caption: caption || undefined,
       fileName,
     });
   } else if (isAudio) {
-    return await state.socket.sendMessage(jid, {
+    result = await state.socket.sendMessage(jid, {
       audio: fileBuffer,
       mimetype: mimeType,
       fileName,
     });
   } else {
     // PDF, DOCX, XLSX, etc. sent as document
-    return await state.socket.sendMessage(jid, {
+    result = await state.socket.sendMessage(jid, {
       document: fileBuffer,
       mimetype: mimeType,
       fileName: fileName,
       caption: caption || undefined,
     });
   }
+
+  console.log(`[WA SEND] File berhasil dikirim. Key ID: ${result?.key?.id}`);
+  return result;
 }
 
 // Fetch all participating WhatsApp Groups

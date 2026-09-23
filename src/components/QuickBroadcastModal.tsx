@@ -18,7 +18,7 @@ export default function QuickBroadcastModal({
 }: QuickBroadcastModalProps) {
   const [title, setTitle] = useState('Broadcast Langsung');
   const [message, setMessage] = useState('');
-  const [recipientType, setRecipientType] = useState<'all' | 'group' | 'custom'>('all');
+  const [recipientType, setRecipientType] = useState<'all' | 'group' | 'custom' | 'wa_group'>('wa_group');
   const [selectedGroup, setSelectedGroup] = useState('');
   const [customPhones, setCustomPhones] = useState('');
 
@@ -183,25 +183,43 @@ export default function QuickBroadcastModal({
               value={recipientType}
               onChange={(e) => setRecipientType(e.target.value as any)}
             >
-              <option value="all">Semua Kontak ({contacts.length})</option>
-              <option value="group">Grup Kontak Tertentu</option>
-              <option value="wa_group">👥 Grup WhatsApp ({waGroups.length} grup)</option>
-              <option value="custom">Input Nomor Manual</option>
+              <option value="wa_group">👥 Grup WhatsApp ({waGroups.length} grup terdeteksi)</option>
+              <option value="all">📱 Semua Kontak Buku Telepon ({contacts.length} kontak)</option>
+              <option value="group">🏷️ Kategori Kontak Buku Telepon</option>
+              <option value="custom">✍️ Input Nomor Manual</option>
             </select>
           </div>
 
           {recipientType === 'wa_group' && (
             <div className="form-group" style={{ background: 'var(--bg-input)', padding: 12, borderRadius: 'var(--radius-md)', border: '1px solid var(--border-subtle)' }}>
-              <label className="form-label" style={{ fontWeight: 600, color: 'var(--wa-emerald)', marginBottom: 8 }}>
-                Pilih Grup WhatsApp ({selectedWaGroupIds.length} dipilih)
-              </label>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                <label className="form-label" style={{ marginBottom: 0, fontWeight: 600, color: 'var(--wa-emerald)' }}>
+                  Pilih Grup WhatsApp Tujuan ({selectedWaGroupIds.length} dipilih)
+                </label>
+                <button
+                  type="button"
+                  className="btn btn-secondary btn-sm"
+                  style={{ padding: '2px 8px', fontSize: '0.72rem' }}
+                  onClick={async () => {
+                    try {
+                      const res = await fetch('/api/wa/groups');
+                      const data = await res.json();
+                      if (data.groups) setWaGroups(data.groups);
+                    } catch (e) {
+                      console.error(e);
+                    }
+                  }}
+                >
+                  🔄 Segarkan Grup
+                </button>
+              </div>
 
               {waGroups.length === 0 ? (
                 <div style={{ fontSize: '0.82rem', color: 'var(--text-muted)', padding: '6px 0' }}>
-                  Belum ada grup terdeteksi. Pastikan WhatsApp sudah terhubung di dashboard.
+                  Belum ada grup terdeteksi. Pastikan WhatsApp sudah terhubung di dashboard, lalu klik <strong>Segarkan Grup</strong> di atas.
                 </div>
               ) : (
-                <div style={{ maxHeight: 150, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 6 }}>
+                <div style={{ maxHeight: 180, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 6 }}>
                   {waGroups.map((g) => {
                     const isChecked = selectedWaGroupIds.includes(g.id);
                     return (
@@ -262,16 +280,33 @@ export default function QuickBroadcastModal({
 
           {recipientType === 'group' && (
             <div className="form-group">
-              <label className="form-label">Pilih Grup</label>
-              <select
-                className="form-select"
-                value={selectedGroup}
-                onChange={(e) => setSelectedGroup(e.target.value)}
-              >
-                {groups.map((g) => (
-                  <option key={g} value={g}>{g}</option>
-                ))}
-              </select>
+              <label className="form-label">Pilih Kategori Kontak Buku Telepon</label>
+              {groups.length === 0 ? (
+                <div style={{ padding: 10, borderRadius: 'var(--radius-sm)', background: 'rgba(234, 179, 8, 0.1)', border: '1px solid rgba(234, 179, 8, 0.3)', fontSize: '0.82rem', color: '#facc15' }}>
+                  ⚠️ Belum ada kategori di buku kontak internal.
+                  <div style={{ marginTop: 6 }}>
+                    Jika ingin mengirim ke <strong>Grup WhatsApp</strong>, pilih opsi <strong>👥 Grup WhatsApp</strong> di dropdown atas.
+                  </div>
+                  <button
+                    type="button"
+                    className="btn btn-secondary btn-sm"
+                    style={{ marginTop: 8 }}
+                    onClick={() => setRecipientType('wa_group')}
+                  >
+                    Beralih ke 👥 Grup WhatsApp
+                  </button>
+                </div>
+              ) : (
+                <select
+                  className="form-select"
+                  value={selectedGroup}
+                  onChange={(e) => setSelectedGroup(e.target.value)}
+                >
+                  {groups.map((g) => (
+                    <option key={g} value={g}>{g}</option>
+                  ))}
+                </select>
+              )}
             </div>
           )}
 

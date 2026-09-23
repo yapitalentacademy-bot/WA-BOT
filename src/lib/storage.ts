@@ -47,16 +47,7 @@ function writeJsonFile<T>(filename: string, data: T): void {
 export const Storage = {
   // CONTACTS
   getContacts(): Contact[] {
-    return readJsonFile<Contact[]>('contacts.json', [
-      {
-        id: 'c-1',
-        name: 'Contoh Kontak Siswa/Peserta',
-        phone: '6281234567890',
-        group: 'Peserta Jadwal',
-        notes: 'Nomor demo untuk pengetesan',
-        createdAt: new Date().toISOString(),
-      },
-    ]);
+    return readJsonFile<Contact[]>('contacts.json', []);
   },
   saveContacts(contacts: Contact[]): void {
     writeJsonFile('contacts.json', contacts);

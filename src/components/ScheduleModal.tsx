@@ -20,7 +20,7 @@ export default function ScheduleModal({ isOpen, onClose, onSuccess, initialFile 
   const [recurringDay, setRecurringDay] = useState(1); // Monday
 
   // Recipients
-  const [recipientType, setRecipientType] = useState<'all' | 'group' | 'custom'>('all');
+  const [recipientType, setRecipientType] = useState<'all' | 'group' | 'custom' | 'wa_group'>('wa_group');
   const [selectedGroup, setSelectedGroup] = useState('');
   const [customPhones, setCustomPhones] = useState('');
 
@@ -534,10 +534,10 @@ export default function ScheduleModal({ isOpen, onClose, onSuccess, initialFile 
                   value={recipientType}
                   onChange={(e) => setRecipientType(e.target.value as any)}
                 >
-                  <option value="all">Semua Kontak ({contacts.length} orang)</option>
-                  <option value="group">Berdasarkan Tag / Kategori Kontak</option>
                   <option value="wa_group">👥 Grup WhatsApp ({waGroups.length} grup terdeteksi)</option>
-                  <option value="custom">Input Nomor Manual</option>
+                  <option value="all">📱 Semua Kontak Buku Telepon ({contacts.length} orang)</option>
+                  <option value="group">🏷️ Berdasarkan Tag / Kategori Kontak</option>
+                  <option value="custom">✍️ Input Nomor Manual</option>
                 </select>
               </div>
 
@@ -624,18 +624,35 @@ export default function ScheduleModal({ isOpen, onClose, onSuccess, initialFile 
 
               {recipientType === 'group' && (
                 <div className="form-group">
-                  <label className="form-label">Pilih Grup Kontak</label>
-                  <select
-                    className="form-select"
-                    value={selectedGroup}
-                    onChange={(e) => setSelectedGroup(e.target.value)}
-                  >
-                    {groups.map((g) => (
-                      <option key={g} value={g}>
-                        {g} ({contacts.filter((c) => c.group === g).length} kontak)
-                      </option>
-                    ))}
-                  </select>
+                  <label className="form-label">Pilih Kategori Kontak Buku Telepon</label>
+                  {groups.length === 0 ? (
+                    <div style={{ padding: 10, borderRadius: 'var(--radius-sm)', background: 'rgba(234, 179, 8, 0.1)', border: '1px solid rgba(234, 179, 8, 0.3)', fontSize: '0.82rem', color: '#facc15' }}>
+                      ⚠️ Belum ada kategori di buku kontak internal.
+                      <div style={{ marginTop: 6 }}>
+                        Jika ingin menjadwalkan ke <strong>Grup WhatsApp</strong>, pilih opsi <strong>👥 Grup WhatsApp</strong> di dropdown atas.
+                      </div>
+                      <button
+                        type="button"
+                        className="btn btn-secondary btn-sm"
+                        style={{ marginTop: 8 }}
+                        onClick={() => setRecipientType('wa_group')}
+                      >
+                        Beralih ke 👥 Grup WhatsApp
+                      </button>
+                    </div>
+                  ) : (
+                    <select
+                      className="form-select"
+                      value={selectedGroup}
+                      onChange={(e) => setSelectedGroup(e.target.value)}
+                    >
+                      {groups.map((g) => (
+                        <option key={g} value={g}>
+                          {g} ({contacts.filter((c) => c.group === g).length} kontak)
+                        </option>
+                      ))}
+                    </select>
+                  )}
                 </div>
               )}
 
