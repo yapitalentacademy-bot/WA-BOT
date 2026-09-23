@@ -17,6 +17,7 @@ export default function HomePage() {
   const [showScheduleModal, setShowScheduleModal] = useState(false);
   const [showQuickModal, setShowQuickModal] = useState(false);
   const [selectedFileForSchedule, setSelectedFileForSchedule] = useState<AttachedFile | null>(null);
+  const [editingSchedule, setEditingSchedule] = useState<BroadcastSchedule | null>(null);
 
   // Dashboard Stats & Schedules
   const [schedules, setSchedules] = useState<BroadcastSchedule[]>([]);
@@ -62,7 +63,14 @@ export default function HomePage() {
   }, []);
 
   const handleScheduleWithFile = (file: AttachedFile) => {
+    setEditingSchedule(null);
     setSelectedFileForSchedule(file);
+    setShowScheduleModal(true);
+  };
+
+  const handleEditSchedule = (sch: BroadcastSchedule) => {
+    setEditingSchedule(sch);
+    setSelectedFileForSchedule(null);
     setShowScheduleModal(true);
   };
 
@@ -174,6 +182,7 @@ export default function HomePage() {
             className="btn btn-primary"
             style={{ width: '100%', fontSize: '0.85rem' }}
             onClick={() => {
+              setEditingSchedule(null);
               setSelectedFileForSchedule(null);
               setShowScheduleModal(true);
             }}
@@ -220,6 +229,7 @@ export default function HomePage() {
                 <button
                   className="btn btn-primary"
                   onClick={() => {
+                    setEditingSchedule(null);
                     setSelectedFileForSchedule(null);
                     setShowScheduleModal(true);
                   }}
@@ -311,46 +321,51 @@ export default function HomePage() {
                   <table className="custom-table">
                     <thead>
                       <tr>
-                        <th>Nama Jadwal</th>
-                        <th>File Tertaut</th>
-                        <th>Frekuensi & Waktu</th>
-                        <th>Target Penerima</th>
-                        <th>Status</th>
-                        <th>Aksi</th>
+                        <th style={{ padding: '14px 18px', width: '28%' }}>Nama Jadwal</th>
+                        <th style={{ padding: '14px 18px', width: '20%' }}>File Tertaut</th>
+                        <th style={{ padding: '14px 18px', width: '18%' }}>Frekuensi & Waktu</th>
+                        <th style={{ padding: '14px 18px', width: '16%' }}>Target Penerima</th>
+                        <th style={{ padding: '14px 18px', width: '10%' }}>Status</th>
+                        <th style={{ padding: '14px 18px', textAlign: 'right', width: '8%' }}>Aksi</th>
                       </tr>
                     </thead>
                     <tbody>
                       {schedules.map((sch) => {
                         return (
-                          <tr key={sch.id}>
-                            <td>
-                              <div style={{ fontWeight: 600, color: '#ffffff' }}>{sch.title}</div>
+                          <tr key={sch.id} style={{ transition: 'background 0.2s ease' }}>
+                            <td style={{ verticalAlign: 'middle', padding: '14px 18px' }}>
+                              <div style={{ fontWeight: 600, color: '#ffffff', fontSize: '0.92rem', marginBottom: 4 }}>
+                                {sch.title}
+                              </div>
                               <div
                                 style={{
                                   fontSize: '0.78rem',
                                   color: 'var(--text-muted)',
-                                  maxWidth: 240,
+                                  maxWidth: 280,
                                   overflow: 'hidden',
                                   textOverflow: 'ellipsis',
                                   whiteSpace: 'nowrap',
                                 }}
+                                title={sch.message}
                               >
                                 {sch.message}
                               </div>
                             </td>
-                            <td>
+                            <td style={{ verticalAlign: 'middle', padding: '14px 18px' }}>
                               {sch.attachedFile ? (
                                 <div
                                   style={{
                                     display: 'inline-flex',
                                     alignItems: 'center',
                                     gap: 6,
-                                    background: 'rgba(0, 168, 132, 0.15)',
+                                    background: 'rgba(0, 168, 132, 0.12)',
+                                    border: '1px solid rgba(0, 168, 132, 0.25)',
                                     color: 'var(--wa-emerald)',
-                                    padding: '3px 8px',
-                                    borderRadius: 'var(--radius-sm)',
+                                    padding: '4px 10px',
+                                    borderRadius: 'var(--radius-full)',
                                     fontSize: '0.78rem',
-                                    maxWidth: 180,
+                                    fontWeight: 500,
+                                    maxWidth: 200,
                                     overflow: 'hidden',
                                     textOverflow: 'ellipsis',
                                     whiteSpace: 'nowrap',
@@ -358,57 +373,94 @@ export default function HomePage() {
                                   title={sch.attachedFile.originalName}
                                 >
                                   <span>📎</span>
-                                  <span>{sch.attachedFile.originalName}</span>
+                                  <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                                    {sch.attachedFile.originalName}
+                                  </span>
                                 </div>
                               ) : (
-                                <span style={{ color: 'var(--text-dim)', fontSize: '0.8rem' }}>Tanpa File</span>
+                                <span style={{ color: 'var(--text-dim)', fontSize: '0.8rem', fontStyle: 'italic' }}>
+                                  Tanpa Lampiran
+                                </span>
                               )}
                             </td>
-                            <td>
+                            <td style={{ verticalAlign: 'middle', padding: '14px 18px' }}>
+                              <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                                <span
+                                  style={{
+                                    fontSize: '0.72rem',
+                                    fontWeight: 600,
+                                    background: sch.scheduleType === 'once' ? 'rgba(56, 189, 248, 0.15)' : 'rgba(168, 85, 247, 0.15)',
+                                    color: sch.scheduleType === 'once' ? '#38bdf8' : '#c084fc',
+                                    border: sch.scheduleType === 'once' ? '1px solid rgba(56, 189, 248, 0.3)' : '1px solid rgba(168, 85, 247, 0.3)',
+                                    padding: '2px 8px',
+                                    borderRadius: 'var(--radius-sm)',
+                                  }}
+                                >
+                                  {sch.scheduleType === 'once'
+                                    ? 'Sekali'
+                                    : sch.scheduleType === 'daily'
+                                    ? 'Harian'
+                                    : 'Mingguan'}
+                                </span>
+                                <span style={{ fontSize: '0.84rem', fontWeight: 500, color: 'var(--text-main)' }}>
+                                  {sch.scheduleType === 'once'
+                                    ? new Date(sch.scheduledTime).toLocaleString('id-ID', {
+                                        day: 'numeric',
+                                        month: 'short',
+                                        hour: '2-digit',
+                                        minute: '2-digit',
+                                      })
+                                    : sch.recurringTime + ' WIB'}
+                                </span>
+                              </div>
+                            </td>
+                            <td style={{ verticalAlign: 'middle', padding: '14px 18px' }}>
                               <span
                                 style={{
-                                  fontSize: '0.75rem',
-                                  background: 'var(--bg-elevated)',
-                                  padding: '2px 8px',
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
+                                  gap: 6,
+                                  fontSize: '0.8rem',
+                                  background: 'rgba(255, 255, 255, 0.04)',
+                                  padding: '4px 10px',
                                   borderRadius: 'var(--radius-sm)',
-                                  marginRight: 6,
+                                  border: '1px solid var(--border-subtle)',
                                 }}
                               >
-                                {sch.scheduleType === 'once'
-                                  ? 'Sekali'
-                                  : sch.scheduleType === 'daily'
-                                  ? 'Harian'
-                                  : 'Mingguan'}
-                              </span>
-                              <span style={{ fontSize: '0.85rem' }}>
-                                {sch.scheduleType === 'once'
-                                  ? new Date(sch.scheduledTime).toLocaleString('id-ID', {
-                                      day: 'numeric',
-                                      month: 'short',
-                                      hour: '2-digit',
-                                      minute: '2-digit',
-                                    })
-                                  : sch.recurringTime + ' WIB'}
-                              </span>
-                            </td>
-                            <td>
-                              <span style={{ fontSize: '0.82rem' }}>
-                                {sch.recipients.type === 'all'
-                                  ? 'Semua Kontak'
-                                  : sch.recipients.type === 'group'
-                                  ? `Kategori: ${sch.recipients.targetGroup}`
-                                  : sch.recipients.type === 'wa_group'
-                                  ? `👥 ${sch.recipients.targetWaGroups?.length || 1} Grup WA`
-                                  : `${sch.recipients.customPhones?.length || 0} Nomor`}
+                                {sch.recipients.type === 'wa_group' ? (
+                                  <>
+                                    <span style={{ color: 'var(--wa-emerald)' }}>👥</span>
+                                    <span>{sch.recipients.targetWaGroups?.length || 1} Grup WA</span>
+                                  </>
+                                ) : sch.recipients.type === 'all' ? (
+                                  <>
+                                    <span>📱</span>
+                                    <span>Semua Kontak</span>
+                                  </>
+                                ) : sch.recipients.type === 'group' ? (
+                                  <>
+                                    <span>🏷️</span>
+                                    <span>{sch.recipients.targetGroup}</span>
+                                  </>
+                                ) : (
+                                  <>
+                                    <span>✍️</span>
+                                    <span>{sch.recipients.customPhones?.length || 0} Nomor</span>
+                                  </>
+                                )}
                               </span>
                             </td>
-                            <td>
+                            <td style={{ verticalAlign: 'middle', padding: '14px 18px' }}>
                               <span
                                 style={{
-                                  fontSize: '0.75rem',
-                                  padding: '3px 8px',
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
+                                  gap: 6,
+                                  fontSize: '0.78rem',
+                                  padding: '4px 10px',
                                   borderRadius: 'var(--radius-full)',
                                   fontWeight: 600,
+                                  whiteSpace: 'nowrap',
                                   background:
                                     sch.status === 'active'
                                       ? 'rgba(34, 197, 94, 0.15)'
@@ -421,19 +473,54 @@ export default function HomePage() {
                                       : sch.status === 'completed'
                                       ? '#38bdf8'
                                       : '#fbbf24',
+                                  border:
+                                    sch.status === 'active'
+                                      ? '1px solid rgba(34, 197, 94, 0.3)'
+                                      : sch.status === 'completed'
+                                      ? '1px solid rgba(56, 189, 248, 0.3)'
+                                      : '1px solid rgba(245, 158, 11, 0.3)',
                                 }}
                               >
+                                <span
+                                  style={{
+                                    width: 6,
+                                    height: 6,
+                                    borderRadius: '50%',
+                                    background: 'currentColor',
+                                    boxShadow: sch.status === 'active' ? '0 0 6px #4ade80' : 'none',
+                                    flexShrink: 0,
+                                  }}
+                                />
                                 {sch.status === 'active'
-                                  ? '● Aktif'
+                                  ? 'Aktif'
                                   : sch.status === 'completed'
-                                  ? '✓ Selesai'
-                                  : '⏸ Jeda'}
+                                  ? 'Selesai'
+                                  : 'Jeda'}
                               </span>
                             </td>
-                            <td>
-                              <div style={{ display: 'flex', gap: 6 }}>
+                            <td style={{ verticalAlign: 'middle', padding: '14px 18px', textAlign: 'right' }}>
+                              <div style={{ display: 'inline-flex', gap: 6, justifyContent: 'flex-end' }}>
                                 <button
                                   className="btn btn-secondary btn-sm"
+                                  style={{
+                                    background: 'rgba(0, 168, 132, 0.15)',
+                                    color: 'var(--wa-emerald)',
+                                    borderColor: 'rgba(0, 168, 132, 0.3)',
+                                    display: 'inline-flex',
+                                    alignItems: 'center',
+                                    gap: 4,
+                                    padding: '5px 10px',
+                                    fontSize: '0.78rem',
+                                    fontWeight: 600,
+                                  }}
+                                  title="Edit Jadwal Ini"
+                                  onClick={() => handleEditSchedule(sch)}
+                                >
+                                  <span>✏️</span> Edit
+                                </button>
+                                <button
+                                  className="btn btn-secondary btn-sm"
+                                  style={{ padding: '5px 8px' }}
                                   title={sch.status === 'active' ? 'Jeda Jadwal' : 'Aktifkan'}
                                   onClick={() => handleToggleSchedule(sch)}
                                 >
@@ -441,7 +528,7 @@ export default function HomePage() {
                                 </button>
                                 <button
                                   className="btn btn-secondary btn-sm"
-                                  style={{ color: '#f87171' }}
+                                  style={{ color: '#f87171', padding: '5px 8px' }}
                                   title="Hapus Jadwal"
                                   onClick={() => handleDeleteSchedule(sch.id, sch.title)}
                                 >
@@ -480,11 +567,12 @@ export default function HomePage() {
         {activeTab === 'logs' && <LogsViewer />}
       </main>
 
-      {/* MODAL BUAT JADWAL */}
+      {/* MODAL BUAT & EDIT JADWAL */}
       <ScheduleModal
         isOpen={showScheduleModal}
         onClose={() => {
           setShowScheduleModal(false);
+          setEditingSchedule(null);
           setSelectedFileForSchedule(null);
         }}
         onSuccess={() => {
@@ -492,6 +580,7 @@ export default function HomePage() {
           setActiveTab('dashboard');
         }}
         initialFile={selectedFileForSchedule}
+        editingSchedule={editingSchedule}
       />
 
       {/* MODAL QUICK BROADCAST */}

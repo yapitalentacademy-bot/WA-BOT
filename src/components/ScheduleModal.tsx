@@ -1,16 +1,17 @@
 'use client';
 
 import React, { useState, useEffect, useRef } from 'react';
-import { MessageTemplate, AttachedFile, Contact, ScheduleRepeatType } from '@/types';
+import { MessageTemplate, AttachedFile, Contact, ScheduleRepeatType, BroadcastSchedule } from '@/types';
 
 interface ScheduleModalProps {
   isOpen: boolean;
   onClose: () => void;
   onSuccess: () => void;
   initialFile?: AttachedFile | null;
+  editingSchedule?: BroadcastSchedule | null;
 }
 
-export default function ScheduleModal({ isOpen, onClose, onSuccess, initialFile }: ScheduleModalProps) {
+export default function ScheduleModal({ isOpen, onClose, onSuccess, initialFile, editingSchedule }: ScheduleModalProps) {
   const [title, setTitle] = useState('');
   const [message, setMessage] = useState('');
   const [scheduleType, setScheduleType] = useState<ScheduleRepeatType>('once');
@@ -50,23 +51,64 @@ export default function ScheduleModal({ isOpen, onClose, onSuccess, initialFile 
 
   useEffect(() => {
     if (isOpen) {
-      // Set default scheduled time to 10 minutes in the future
-      const d = new Date(Date.now() + 10 * 60 * 1000);
-      const yyyy = d.getFullYear();
-      const mm = String(d.getMonth() + 1).padStart(2, '0');
-      const dd = String(d.getDate()).padStart(2, '0');
-      const hh = String(d.getHours()).padStart(2, '0');
-      const min = String(d.getMinutes()).padStart(2, '0');
-      setScheduledDate(`${yyyy}-${mm}-${dd}`);
-      setScheduledTime(`${hh}:${min}`);
-
-      // Load templates, files, contacts, and WA groups
       fetchData();
-      if (initialFile) {
-        setAttachedFile(initialFile);
+
+      if (editingSchedule) {
+        setTitle(editingSchedule.title);
+        setMessage(editingSchedule.message);
+        setScheduleType(editingSchedule.scheduleType);
+        if (editingSchedule.scheduleType === 'once') {
+          const d = new Date(editingSchedule.scheduledTime);
+          const yyyy = d.getFullYear();
+          const mm = String(d.getMonth() + 1).padStart(2, '0');
+          const dd = String(d.getDate()).padStart(2, '0');
+          const hh = String(d.getHours()).padStart(2, '0');
+          const min = String(d.getMinutes()).padStart(2, '0');
+          setScheduledDate(`${yyyy}-${mm}-${dd}`);
+          setScheduledTime(`${hh}:${min}`);
+        }
+        if (editingSchedule.recurringTime) {
+          setRecurringTime(editingSchedule.recurringTime);
+        }
+        if (editingSchedule.recurringDay !== undefined) {
+          setRecurringDay(editingSchedule.recurringDay);
+        }
+        setAttachedFile(editingSchedule.attachedFile || null);
+        setAntiBanMin(editingSchedule.antiBanDelayMin || 3);
+        setAntiBanMax(editingSchedule.antiBanDelayMax || 7);
+
+        // Recipients
+        const rType = editingSchedule.recipients?.type || 'wa_group';
+        setRecipientType(rType);
+        if (rType === 'wa_group') {
+          setSelectedWaGroupIds(editingSchedule.recipients.targetWaGroups?.map((g) => g.id) || []);
+        } else if (rType === 'group') {
+          setSelectedGroup(editingSchedule.recipients.targetGroup || '');
+        } else if (rType === 'custom') {
+          setCustomPhones((editingSchedule.recipients.customPhones || []).join('\n'));
+        }
+      } else {
+        // Default new schedule
+        setTitle('');
+        setMessage('');
+        setScheduleType('once');
+        const d = new Date(Date.now() + 10 * 60 * 1000);
+        const yyyy = d.getFullYear();
+        const mm = String(d.getMonth() + 1).padStart(2, '0');
+        const dd = String(d.getDate()).padStart(2, '0');
+        const hh = String(d.getHours()).padStart(2, '0');
+        const min = String(d.getMinutes()).padStart(2, '0');
+        setScheduledDate(`${yyyy}-${mm}-${dd}`);
+        setScheduledTime(`${hh}:${min}`);
+        setRecurringTime('08:00');
+        setRecurringDay(1);
+        setRecipientType('wa_group');
+        setSelectedWaGroupIds([]);
+        setCustomPhones('');
+        setAttachedFile(initialFile || null);
       }
     }
-  }, [isOpen, initialFile]);
+  }, [isOpen, initialFile, editingSchedule]);
 
   const fetchData = async () => {
     try {
@@ -235,8 +277,11 @@ export default function ScheduleModal({ isOpen, onClose, onSuccess, initialFile 
         antiBanDelayMax: antiBanMax,
       };
 
-      const res = await fetch('/api/schedules', {
-        method: 'POST',
+      const url = editingSchedule ? `/api/schedules/${editingSchedule.id}` : '/api/schedules';
+      const method = editingSchedule ? 'PUT' : 'POST';
+
+      const res = await fetch(url, {
+        method,
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
       });
@@ -269,10 +314,13 @@ export default function ScheduleModal({ isOpen, onClose, onSuccess, initialFile 
         <div className="modal-header">
           <div>
             <h3 style={{ fontSize: '1.2rem', display: 'flex', alignItems: 'center', gap: 8 }}>
-              <span>📅</span> Buat Jadwal & Broadcast WhatsApp Otomatis
+              <span>{editingSchedule ? '✏️' : '📅'}</span>{' '}
+              {editingSchedule ? 'Edit Jadwal Pengiriman' : 'Buat Jadwal & Broadcast WhatsApp Otomatis'}
             </h3>
             <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
-              Tautkan file jadwal dan template broadcast untuk dibagikan secara otomatis
+              {editingSchedule
+                ? 'Perbarui waktu pengiriman, lampiran file jadwal, atau target penerima pesan'
+                : 'Tautkan file jadwal dan template broadcast untuk dibagikan secara otomatis'}
             </p>
           </div>
           <button className="close-btn" onClick={onClose}>&times;</button>
@@ -777,7 +825,7 @@ export default function ScheduleModal({ isOpen, onClose, onSuccess, initialFile 
               Batal
             </button>
             <button type="submit" className="btn btn-primary" disabled={loading}>
-              {loading ? 'Menyimpan...' : '✅ Simpan & Aktifkan Jadwal'}
+              {loading ? 'Menyimpan...' : editingSchedule ? '💾 Simpan Perubahan Jadwal' : '✅ Simpan & Aktifkan Jadwal'}
             </button>
           </div>
         </form>

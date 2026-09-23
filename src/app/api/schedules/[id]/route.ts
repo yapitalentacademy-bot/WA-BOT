@@ -27,3 +27,11 @@ export async function PATCH(
     return NextResponse.json({ error: error?.message || 'Gagal memperbarui jadwal' }, { status: 500 });
   }
 }
+
+export async function PUT(
+  req: Request,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  return PATCH(req, { params });
+}
+
