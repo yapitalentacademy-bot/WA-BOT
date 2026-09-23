@@ -51,10 +51,11 @@ export interface BroadcastSchedule {
   templateId?: string;
   attachedFile?: AttachedFile | null;
   recipients: {
-    type: 'all' | 'group' | 'custom' | 'wa_group';
+    type: 'all' | 'group' | 'custom' | 'wa_group' | 'contacts';
     targetGroup?: string;
     customPhones?: string[]; // array of phone numbers
     targetWaGroups?: { id: string; name: string }[]; // array of WhatsApp Groups
+    selectedContacts?: { name: string; phone: string }[]; // array of selected contacts
   };
   scheduleType: ScheduleRepeatType;
   scheduledTime: string; // ISO string e.g. 2026-09-24T08:00

@@ -119,6 +119,19 @@ export async function executeSchedule(schedule: BroadcastSchedule): Promise<void
       phone: g.id,
       group: 'Grup WA',
     }));
+  } else if (schedule.recipients.type === 'contacts') {
+    if (schedule.recipients.selectedContacts && schedule.recipients.selectedContacts.length > 0) {
+      targetContacts = schedule.recipients.selectedContacts;
+    } else if (schedule.recipients.customPhones && schedule.recipients.customPhones.length > 0) {
+      targetContacts = schedule.recipients.customPhones.map((phone) => {
+        const match = allContacts.find((c) => c.phone.includes(phone) || phone.includes(c.phone));
+        return {
+          name: match ? match.name : 'Penerima',
+          phone,
+          group: match?.group,
+        };
+      });
+    }
   }
 
   if (targetContacts.length === 0) {

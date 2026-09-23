@@ -18,7 +18,7 @@ export default function QuickBroadcastModal({
 }: QuickBroadcastModalProps) {
   const [title, setTitle] = useState('Broadcast Langsung');
   const [message, setMessage] = useState('');
-  const [recipientType, setRecipientType] = useState<'all' | 'group' | 'custom' | 'wa_group'>('wa_group');
+  const [recipientType, setRecipientType] = useState<'all' | 'group' | 'custom' | 'wa_group' | 'contacts'>('contacts');
   const [selectedGroup, setSelectedGroup] = useState('');
   const [customPhones, setCustomPhones] = useState('');
 
@@ -29,6 +29,10 @@ export default function QuickBroadcastModal({
   const [manualWaGroupId, setManualWaGroupId] = useState('');
   const [attachedFile, setAttachedFile] = useState<AttachedFile | null>(initialFile || null);
 
+  const [availableContacts, setAvailableContacts] = useState<{ id: string; name: string; phone: string; source: string }[]>([]);
+  const [selectedContacts, setSelectedContacts] = useState<{ name: string; phone: string }[]>([]);
+  const [contactSearchQuery, setContactSearchQuery] = useState('');
+
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -38,7 +42,8 @@ export default function QuickBroadcastModal({
       Promise.all([
         fetch('/api/contacts').then((res) => res.json()),
         fetch('/api/wa/groups').then((res) => res.json()),
-      ]).then(([contactsData, waGroupsData]) => {
+        fetch('/api/wa/contacts').then((res) => res.json()),
+      ]).then(([contactsData, waGroupsData, waContactsData]) => {
         if (Array.isArray(contactsData)) {
           setContacts(contactsData);
           const uGroups = Array.from(new Set(contactsData.map((c: Contact) => c.group).filter(Boolean))) as string[];
@@ -48,9 +53,75 @@ export default function QuickBroadcastModal({
         if (waGroupsData?.groups && Array.isArray(waGroupsData.groups)) {
           setWaGroups(waGroupsData.groups);
         }
+
+        // Combine contacts
+        const combined: { id: string; name: string; phone: string; source: string }[] = [];
+        const seenPhones = new Set<string>();
+
+        if (Array.isArray(contactsData)) {
+          for (const c of contactsData) {
+            if (c.phone && !seenPhones.has(c.phone)) {
+              seenPhones.add(c.phone);
+              combined.push({
+                id: c.id,
+                name: c.name || 'Kontak',
+                phone: c.phone,
+                source: c.group ? `Kategori: ${c.group}` : 'Buku Telepon',
+              });
+            }
+          }
+        }
+
+        if (waContactsData?.contacts && Array.isArray(waContactsData.contacts)) {
+          for (const c of waContactsData.contacts) {
+            if (c.phone && !seenPhones.has(c.phone)) {
+              seenPhones.add(c.phone);
+              combined.push({
+                id: c.id || c.phone,
+                name: c.name || c.phone,
+                phone: c.phone,
+                source: c.source || 'WhatsApp',
+              });
+            }
+          }
+        }
+
+        setAvailableContacts(combined);
       });
     }
   }, [isOpen, initialFile]);
+
+  const filteredContacts = availableContacts.filter((c) => {
+    if (!contactSearchQuery.trim()) return true;
+    const q = contactSearchQuery.toLowerCase();
+    return c.name.toLowerCase().includes(q) || c.phone.includes(q) || c.source.toLowerCase().includes(q);
+  });
+
+  const isContactSelected = (phone: string) => {
+    return selectedContacts.some((c) => c.phone === phone);
+  };
+
+  const toggleContactSelection = (contact: { name: string; phone: string }) => {
+    setSelectedContacts((prev) => {
+      const exists = prev.some((c) => c.phone === contact.phone);
+      if (exists) {
+        return prev.filter((c) => c.phone !== contact.phone);
+      } else {
+        return [...prev, { name: contact.name, phone: contact.phone }];
+      }
+    });
+  };
+
+  const handleSelectAllFilteredContacts = () => {
+    const map = new Map<string, { name: string; phone: string }>();
+    selectedContacts.forEach((c) => map.set(c.phone, c));
+    filteredContacts.forEach((c) => map.set(c.phone, { name: c.name, phone: c.phone }));
+    setSelectedContacts(Array.from(map.values()));
+  };
+
+  const handleClearAllContacts = () => {
+    setSelectedContacts([]);
+  };
 
   if (!isOpen) return null;
 
@@ -90,6 +161,16 @@ export default function QuickBroadcastModal({
         }
       }
 
+      let selectedContactsPayload: { name: string; phone: string }[] | undefined = undefined;
+      if (recipientType === 'contacts') {
+        if (selectedContacts.length === 0) {
+          setError('Pilih minimal 1 nama kontak penerima pesan');
+          setLoading(false);
+          return;
+        }
+        selectedContactsPayload = selectedContacts;
+      }
+
       const res = await fetch('/api/broadcast/instant', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -102,6 +183,7 @@ export default function QuickBroadcastModal({
             targetGroup: recipientType === 'group' ? selectedGroup : undefined,
             customPhones: recipientType === 'custom' ? phones : undefined,
             targetWaGroups: targetWaGroupsPayload,
+            selectedContacts: selectedContactsPayload,
           },
           antiBanDelayMin: 3,
           antiBanDelayMax: 6,
@@ -183,12 +265,159 @@ export default function QuickBroadcastModal({
               value={recipientType}
               onChange={(e) => setRecipientType(e.target.value as any)}
             >
+              <option value="contacts">👤 Pilih Nama Kontak ({availableContacts.length} kontak terdeteksi)</option>
               <option value="wa_group">👥 Grup WhatsApp ({waGroups.length} grup terdeteksi)</option>
               <option value="all">📱 Semua Kontak Buku Telepon ({contacts.length} kontak)</option>
               <option value="group">🏷️ Kategori Kontak Buku Telepon</option>
               <option value="custom">✍️ Input Nomor Manual</option>
             </select>
           </div>
+
+          {recipientType === 'contacts' && (
+            <div className="form-group" style={{ background: 'var(--bg-input)', padding: 14, borderRadius: 'var(--radius-md)', border: '1px solid var(--border-subtle)' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10, flexWrap: 'wrap', gap: 8 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <span style={{ fontWeight: 600, fontSize: '0.88rem', color: 'var(--wa-emerald)' }}>
+                    Pilih Nama Kontak
+                  </span>
+                  <span style={{ fontSize: '0.75rem', background: selectedContacts.length > 0 ? 'var(--wa-teal)' : 'rgba(255,255,255,0.08)', color: '#fff', padding: '2px 8px', borderRadius: 12, fontWeight: 600 }}>
+                    {selectedContacts.length} dipilih
+                  </span>
+                </div>
+
+                <div style={{ display: 'flex', gap: 6 }}>
+                  <button
+                    type="button"
+                    className="btn btn-secondary btn-sm"
+                    style={{ padding: '3px 8px', fontSize: '0.74rem' }}
+                    onClick={handleSelectAllFilteredContacts}
+                  >
+                    ✓ Pilih Semua ({filteredContacts.length})
+                  </button>
+                  {selectedContacts.length > 0 && (
+                    <button
+                      type="button"
+                      className="btn btn-secondary btn-sm"
+                      style={{ padding: '3px 8px', fontSize: '0.74rem', color: 'var(--error)' }}
+                      onClick={handleClearAllContacts}
+                    >
+                      ✕ Batal Semua
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              {/* Search bar */}
+              <div style={{ position: 'relative', marginBottom: 10 }}>
+                <input
+                  type="text"
+                  className="form-input"
+                  style={{ fontSize: '0.82rem', padding: '7px 28px 7px 10px' }}
+                  placeholder="🔍 Cari nama kontak, nomor telepon, atau kategori..."
+                  value={contactSearchQuery}
+                  onChange={(e) => setContactSearchQuery(e.target.value)}
+                />
+                {contactSearchQuery && (
+                  <button
+                    type="button"
+                    onClick={() => setContactSearchQuery('')}
+                    style={{
+                      position: 'absolute',
+                      right: 8,
+                      top: '50%',
+                      transform: 'translateY(-50%)',
+                      background: 'none',
+                      border: 'none',
+                      color: 'var(--text-muted)',
+                      cursor: 'pointer',
+                      fontSize: '0.9rem',
+                    }}
+                  >
+                    ✕
+                  </button>
+                )}
+              </div>
+
+              {/* Contact List */}
+              {availableContacts.length === 0 ? (
+                <div style={{ padding: '12px', textAlign: 'center', fontSize: '0.82rem', color: 'var(--text-muted)' }}>
+                  Memuat daftar kontak... Pastikan WhatsApp sudah terhubung di dashboard.
+                </div>
+              ) : filteredContacts.length === 0 ? (
+                <div style={{ padding: '12px', textAlign: 'center', fontSize: '0.82rem', color: 'var(--text-muted)' }}>
+                  Tidak ada kontak yang cocok dengan &quot;{contactSearchQuery}&quot;
+                </div>
+              ) : (
+                <div style={{ maxHeight: 200, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 6, paddingRight: 4 }}>
+                  {filteredContacts.map((c) => {
+                    const selected = isContactSelected(c.phone);
+                    const initial = (c.name || 'K').trim().charAt(0).toUpperCase();
+                    return (
+                      <div
+                        key={c.id || c.phone}
+                        onClick={() => toggleContactSelection({ name: c.name, phone: c.phone })}
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: 10,
+                          padding: '7px 10px',
+                          borderRadius: 'var(--radius-sm)',
+                          background: selected ? 'rgba(0, 168, 132, 0.16)' : 'rgba(255, 255, 255, 0.03)',
+                          cursor: 'pointer',
+                          border: selected ? '1px solid var(--wa-emerald)' : '1px solid transparent',
+                          transition: 'all 0.15s ease',
+                        }}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={selected}
+                          onChange={() => {}} // Handled by row onClick
+                          style={{ cursor: 'pointer' }}
+                        />
+                        <div
+                          style={{
+                            width: 28,
+                            height: 28,
+                            borderRadius: '50%',
+                            background: selected ? 'var(--wa-teal)' : 'rgba(255,255,255,0.1)',
+                            color: '#fff',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            fontSize: '0.8rem',
+                            fontWeight: 600,
+                            flexShrink: 0,
+                          }}
+                        >
+                          {initial}
+                        </div>
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ fontWeight: 600, fontSize: '0.85rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                            {c.name}
+                          </div>
+                          <div style={{ fontSize: '0.73rem', color: 'var(--text-dim)' }}>
+                            {c.phone}
+                          </div>
+                        </div>
+                        <span
+                          style={{
+                            fontSize: '0.68rem',
+                            padding: '2px 6px',
+                            borderRadius: 4,
+                            background: 'rgba(255, 255, 255, 0.06)',
+                            color: 'var(--text-muted)',
+                            flexShrink: 0,
+                          }}
+                        >
+                          {c.source}
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          )}
 
           {recipientType === 'wa_group' && (
             <div className="form-group" style={{ background: 'var(--bg-input)', padding: 12, borderRadius: 'var(--radius-md)', border: '1px solid var(--border-subtle)' }}>
@@ -312,7 +541,19 @@ export default function QuickBroadcastModal({
 
           {recipientType === 'custom' && (
             <div className="form-group">
-              <label className="form-label">Nomor WhatsApp (Satu per baris)</label>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+                <label className="form-label" style={{ marginBottom: 0 }}>
+                  Nomor WhatsApp (Satu per baris)
+                </label>
+                <button
+                  type="button"
+                  className="btn btn-secondary btn-sm"
+                  style={{ padding: '2px 8px', fontSize: '0.72rem', color: 'var(--wa-emerald)' }}
+                  onClick={() => setRecipientType('contacts')}
+                >
+                  👤 Pilih dari Nama Kontak
+                </button>
+              </div>
               <textarea
                 className="form-textarea"
                 rows={3}
@@ -320,6 +561,9 @@ export default function QuickBroadcastModal({
                 value={customPhones}
                 onChange={(e) => setCustomPhones(e.target.value)}
               />
+              <div style={{ fontSize: '0.74rem', color: 'var(--text-muted)', marginTop: 4 }}>
+                💡 Tips: Lebih mudah memilih nama kontak langsung? Klik tombol <strong>👤 Pilih dari Nama Kontak</strong> di atas.
+              </div>
             </div>
           )}
 
