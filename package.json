@@ -6,6 +6,8 @@
     "dev": "next dev -p 3005",
     "build": "next build",
     "start": "next start -p 3005",
+    "tunnel": "npx localtunnel --port 3005 --subdomain share-otomatis",
+    "cloudflare": "npx cloudflared tunnel --url http://localhost:3005",
     "lint": "next lint"
   },
   "dependencies": {

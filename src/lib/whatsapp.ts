@@ -33,10 +33,19 @@ if (!globalForWA.waState) {
 
 const state = globalForWA.waState;
 
-// Format phone number to WhatsApp JID format
-export function formatToWhatsAppJid(phone: string): string {
+// Format phone number or Group ID to WhatsApp JID format
+export function formatToWhatsAppJid(target: string): string {
+  const trimmed = target.trim();
+  if (trimmed.endsWith('@g.us') || trimmed.endsWith('@s.whatsapp.net')) {
+    return trimmed;
+  }
+  // Check if it's a numeric group ID (groups are like 120363025283921829 or 6281234-1234)
+  if (trimmed.includes('-') || (trimmed.length >= 16 && !trimmed.startsWith('0') && !trimmed.startsWith('62') && !trimmed.startsWith('+'))) {
+    return `${trimmed}@g.us`;
+  }
+
   // Strip any non-digit characters (+, -, spaces)
-  let clean = phone.replace(/\D/g, '');
+  let clean = trimmed.replace(/\D/g, '');
   
   // Convert 08xx to 628xx
   if (clean.startsWith('0')) {
@@ -45,11 +54,7 @@ export function formatToWhatsAppJid(phone: string): string {
     clean = '62' + clean;
   }
   
-  if (!clean.endsWith('@s.whatsapp.net') && !clean.endsWith('@g.us')) {
-    clean = `${clean}@s.whatsapp.net`;
-  }
-  
-  return clean;
+  return `${clean}@s.whatsapp.net`;
 }
 
 export function cleanPhoneNumber(phone: string): string {
@@ -265,5 +270,24 @@ export async function sendWhatsAppFile(
       fileName: fileName,
       caption: caption || undefined,
     });
+  }
+}
+
+// Fetch all participating WhatsApp Groups
+export async function getWhatsAppGroups(): Promise<{ id: string; name: string; participantsCount: number }[]> {
+  if (!state.socket || state.status !== 'connected') {
+    return [];
+  }
+  try {
+    const groupsMap = await state.socket.groupFetchAllParticipating();
+    const result = Object.values(groupsMap).map((g: any) => ({
+      id: g.id,
+      name: g.subject || 'Grup WhatsApp',
+      participantsCount: Array.isArray(g.participants) ? g.participants.length : 0,
+    }));
+    return result;
+  } catch (err) {
+    console.error('Failed to fetch WhatsApp groups:', err);
+    return [];
   }
 }

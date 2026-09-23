@@ -396,7 +396,9 @@ export default function HomePage() {
                                 {sch.recipients.type === 'all'
                                   ? 'Semua Kontak'
                                   : sch.recipients.type === 'group'
-                                  ? `Grup: ${sch.recipients.targetGroup}`
+                                  ? `Kategori: ${sch.recipients.targetGroup}`
+                                  : sch.recipients.type === 'wa_group'
+                                  ? `👥 ${sch.recipients.targetWaGroups?.length || 1} Grup WA`
                                   : `${sch.recipients.customPhones?.length || 0} Nomor`}
                               </span>
                             </td>

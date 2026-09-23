@@ -1,5 +1,28 @@
 [
   {
+    "id": "sch-1790188167395",
+    "title": "Jadwal Kajian Mingguan di Grup",
+    "message": "Halo semua anggota grup, berikut jadwal kegiatan resmi minggu ini.",
+    "attachedFile": null,
+    "recipients": {
+      "type": "wa_group",
+      "targetWaGroups": [
+        {
+          "id": "120363025283921829@g.us",
+          "name": "Grup Pengajian Akbar"
+        }
+      ]
+    },
+    "scheduleType": "weekly",
+    "scheduledTime": "2026-09-23T18:29:27.395Z",
+    "recurringTime": "08:00",
+    "recurringDay": 5,
+    "status": "active",
+    "antiBanDelayMin": 3,
+    "antiBanDelayMax": 7,
+    "createdAt": "2026-09-23T18:29:27.395Z"
+  },
+  {
     "id": "sch-1790185110484",
     "title": "Share Dokumen Jadwal Resmi",
     "message": "Halo {nama}, berikut file dokumen jadwal resmi Anda. Silakan dicek terlampir!",

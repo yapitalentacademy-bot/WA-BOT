@@ -113,6 +113,12 @@ export async function executeSchedule(schedule: BroadcastSchedule): Promise<void
         group: match?.group,
       };
     });
+  } else if (schedule.recipients.type === 'wa_group' && schedule.recipients.targetWaGroups) {
+    targetContacts = schedule.recipients.targetWaGroups.map((g) => ({
+      name: g.name,
+      phone: g.id,
+      group: 'Grup WA',
+    }));
   }
 
   if (targetContacts.length === 0) {

@@ -36,6 +36,12 @@ export default function ScheduleModal({ isOpen, onClose, onSuccess, initialFile 
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [groups, setGroups] = useState<string[]>([]);
 
+  // WhatsApp Groups
+  const [waGroups, setWaGroups] = useState<{ id: string; name: string; participantsCount: number }[]>([]);
+  const [selectedWaGroupIds, setSelectedWaGroupIds] = useState<string[]>([]);
+  const [manualWaGroupId, setManualWaGroupId] = useState('');
+  const [loadingWaGroups, setLoadingWaGroups] = useState(false);
+
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -54,7 +60,7 @@ export default function ScheduleModal({ isOpen, onClose, onSuccess, initialFile 
       setScheduledDate(`${yyyy}-${mm}-${dd}`);
       setScheduledTime(`${hh}:${min}`);
 
-      // Load templates, files, contacts
+      // Load templates, files, contacts, and WA groups
       fetchData();
       if (initialFile) {
         setAttachedFile(initialFile);
@@ -64,15 +70,17 @@ export default function ScheduleModal({ isOpen, onClose, onSuccess, initialFile 
 
   const fetchData = async () => {
     try {
-      const [tplRes, filesRes, contactsRes] = await Promise.all([
+      const [tplRes, filesRes, contactsRes, waGroupsRes] = await Promise.all([
         fetch('/api/templates'),
         fetch('/api/files'),
         fetch('/api/contacts'),
+        fetch('/api/wa/groups'),
       ]);
-      const [tplData, filesData, contactsData] = await Promise.all([
+      const [tplData, filesData, contactsData, waGroupsData] = await Promise.all([
         tplRes.json(),
         filesRes.json(),
         contactsRes.json(),
+        waGroupsRes.json(),
       ]);
 
       setTemplates(Array.isArray(tplData) ? tplData : []);
@@ -85,8 +93,26 @@ export default function ScheduleModal({ isOpen, onClose, onSuccess, initialFile 
           setSelectedGroup(uniqueGroups[0]);
         }
       }
+      if (waGroupsData?.groups && Array.isArray(waGroupsData.groups)) {
+        setWaGroups(waGroupsData.groups);
+      }
     } catch (err) {
       console.error('Failed to load modal data:', err);
+    }
+  };
+
+  const handleRefreshWaGroups = async () => {
+    setLoadingWaGroups(true);
+    try {
+      const res = await fetch('/api/wa/groups');
+      const data = await res.json();
+      if (data?.groups) {
+        setWaGroups(data.groups);
+      }
+    } catch (err) {
+      console.error('Failed to refresh groups:', err);
+    } finally {
+      setLoadingWaGroups(false);
     }
   };
 
@@ -168,6 +194,29 @@ export default function ScheduleModal({ isOpen, onClose, onSuccess, initialFile 
         .map((p) => p.trim())
         .filter(Boolean);
 
+      let targetWaGroupsPayload: { id: string; name: string }[] | undefined = undefined;
+      if (recipientType === 'wa_group') {
+        const groupsFromChecklist = selectedWaGroupIds.map((id) => {
+          const match = waGroups.find((g) => g.id === id);
+          return { id, name: match ? match.name : 'Grup WA' };
+        });
+        const manualGroups = manualWaGroupId
+          .split('\n')
+          .map((id) => id.trim())
+          .filter(Boolean)
+          .map((id) => ({
+            id: id.endsWith('@g.us') ? id : `${id}@g.us`,
+            name: 'Grup Manual',
+          }));
+
+        targetWaGroupsPayload = [...groupsFromChecklist, ...manualGroups];
+        if (targetWaGroupsPayload.length === 0) {
+          setError('Pilih minimal 1 grup WhatsApp atau masukkan ID grup');
+          setLoading(false);
+          return;
+        }
+      }
+
       const payload = {
         title,
         message,
@@ -176,6 +225,7 @@ export default function ScheduleModal({ isOpen, onClose, onSuccess, initialFile 
           type: recipientType,
           targetGroup: recipientType === 'group' ? selectedGroup : undefined,
           customPhones: recipientType === 'custom' ? phonesArray : undefined,
+          targetWaGroups: targetWaGroupsPayload,
         },
         scheduleType,
         scheduledTime: combinedIso,
@@ -485,10 +535,92 @@ export default function ScheduleModal({ isOpen, onClose, onSuccess, initialFile 
                   onChange={(e) => setRecipientType(e.target.value as any)}
                 >
                   <option value="all">Semua Kontak ({contacts.length} orang)</option>
-                  <option value="group">Berdasarkan Grup Kontak</option>
+                  <option value="group">Berdasarkan Tag / Kategori Kontak</option>
+                  <option value="wa_group">👥 Grup WhatsApp ({waGroups.length} grup terdeteksi)</option>
                   <option value="custom">Input Nomor Manual</option>
                 </select>
               </div>
+
+              {recipientType === 'wa_group' && (
+                <div className="form-group" style={{ background: 'var(--bg-input)', padding: 12, borderRadius: 'var(--radius-md)', border: '1px solid var(--border-subtle)' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                    <label className="form-label" style={{ marginBottom: 0, fontWeight: 600, color: 'var(--wa-emerald)' }}>
+                      Pilih Grup WhatsApp Tujuan ({selectedWaGroupIds.length} dipilih)
+                    </label>
+                    <button
+                      type="button"
+                      className="btn btn-secondary btn-sm"
+                      style={{ padding: '2px 8px', fontSize: '0.72rem' }}
+                      onClick={handleRefreshWaGroups}
+                      disabled={loadingWaGroups}
+                    >
+                      {loadingWaGroups ? 'Memuat...' : '🔄 Sinkronkan Grup'}
+                    </button>
+                  </div>
+
+                  {waGroups.length === 0 ? (
+                    <div style={{ padding: '10px 0', fontSize: '0.82rem', color: 'var(--text-muted)' }}>
+                      Belum ada grup terdeteksi. Pastikan akun WhatsApp Anda sudah terhubung di dashboard, lalu klik <strong>Sinkronkan Grup</strong> di atas.
+                    </div>
+                  ) : (
+                    <div style={{ maxHeight: 160, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 6 }}>
+                      {waGroups.map((g) => {
+                        const isChecked = selectedWaGroupIds.includes(g.id);
+                        return (
+                          <label
+                            key={g.id}
+                            style={{
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: 10,
+                              padding: '6px 10px',
+                              borderRadius: 'var(--radius-sm)',
+                              background: isChecked ? 'rgba(0, 168, 132, 0.15)' : 'rgba(255, 255, 255, 0.03)',
+                              cursor: 'pointer',
+                              fontSize: '0.85rem',
+                              border: isChecked ? '1px solid var(--wa-emerald)' : '1px solid transparent',
+                            }}
+                          >
+                            <input
+                              type="checkbox"
+                              checked={isChecked}
+                              onChange={(e) => {
+                                if (e.target.checked) {
+                                  setSelectedWaGroupIds((prev) => [...prev, g.id]);
+                                } else {
+                                  setSelectedWaGroupIds((prev) => prev.filter((id) => id !== g.id));
+                                }
+                              }}
+                            />
+                            <div style={{ flex: 1, minWidth: 0 }}>
+                              <div style={{ fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                {g.name}
+                              </div>
+                              <div style={{ fontSize: '0.72rem', color: 'var(--text-dim)' }}>
+                                {g.participantsCount} anggota &bull; ID: {g.id.split('@')[0]}
+                              </div>
+                            </div>
+                          </label>
+                        );
+                      })}
+                    </div>
+                  )}
+
+                  <div style={{ marginTop: 10, paddingTop: 8, borderTop: '1px solid var(--border-subtle)' }}>
+                    <label className="form-label" style={{ fontSize: '0.78rem' }}>
+                      Atau Masukkan Group ID Manual (Opsional, contoh: 120363025283921829@g.us):
+                    </label>
+                    <input
+                      type="text"
+                      className="form-input"
+                      style={{ fontSize: '0.82rem', padding: '6px 10px' }}
+                      placeholder="Contoh: 120363025283921829@g.us"
+                      value={manualWaGroupId}
+                      onChange={(e) => setManualWaGroupId(e.target.value)}
+                    />
+                  </div>
+                </div>
+              )}
 
               {recipientType === 'group' && (
                 <div className="form-group">

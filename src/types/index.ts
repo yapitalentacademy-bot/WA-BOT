@@ -36,6 +36,12 @@ export interface MessageTemplate {
   createdAt: string;
 }
 
+export interface WhatsAppGroupItem {
+  id: string;
+  name: string;
+  participantsCount: number;
+}
+
 export type ScheduleRepeatType = 'once' | 'daily' | 'weekly';
 
 export interface BroadcastSchedule {
@@ -45,9 +51,10 @@ export interface BroadcastSchedule {
   templateId?: string;
   attachedFile?: AttachedFile | null;
   recipients: {
-    type: 'all' | 'group' | 'custom';
+    type: 'all' | 'group' | 'custom' | 'wa_group';
     targetGroup?: string;
     customPhones?: string[]; // array of phone numbers
+    targetWaGroups?: { id: string; name: string }[]; // array of WhatsApp Groups
   };
   scheduleType: ScheduleRepeatType;
   scheduledTime: string; // ISO string e.g. 2026-09-24T08:00

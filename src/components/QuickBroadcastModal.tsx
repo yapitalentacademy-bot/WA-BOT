@@ -24,6 +24,9 @@ export default function QuickBroadcastModal({
 
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [groups, setGroups] = useState<string[]>([]);
+  const [waGroups, setWaGroups] = useState<{ id: string; name: string; participantsCount: number }[]>([]);
+  const [selectedWaGroupIds, setSelectedWaGroupIds] = useState<string[]>([]);
+  const [manualWaGroupId, setManualWaGroupId] = useState('');
   const [attachedFile, setAttachedFile] = useState<AttachedFile | null>(initialFile || null);
 
   const [loading, setLoading] = useState(false);
@@ -32,16 +35,20 @@ export default function QuickBroadcastModal({
   useEffect(() => {
     if (isOpen) {
       if (initialFile) setAttachedFile(initialFile);
-      fetch('/api/contacts')
-        .then((res) => res.json())
-        .then((data) => {
-          if (Array.isArray(data)) {
-            setContacts(data);
-            const uGroups = Array.from(new Set(data.map((c: Contact) => c.group).filter(Boolean))) as string[];
-            setGroups(uGroups);
-            if (uGroups.length > 0) setSelectedGroup(uGroups[0]);
-          }
-        });
+      Promise.all([
+        fetch('/api/contacts').then((res) => res.json()),
+        fetch('/api/wa/groups').then((res) => res.json()),
+      ]).then(([contactsData, waGroupsData]) => {
+        if (Array.isArray(contactsData)) {
+          setContacts(contactsData);
+          const uGroups = Array.from(new Set(contactsData.map((c: Contact) => c.group).filter(Boolean))) as string[];
+          setGroups(uGroups);
+          if (uGroups.length > 0) setSelectedGroup(uGroups[0]);
+        }
+        if (waGroupsData?.groups && Array.isArray(waGroupsData.groups)) {
+          setWaGroups(waGroupsData.groups);
+        }
+      });
     }
   }, [isOpen, initialFile]);
 
@@ -60,6 +67,29 @@ export default function QuickBroadcastModal({
     try {
       const phones = customPhones.split('\n').map((p) => p.trim()).filter(Boolean);
 
+      let targetWaGroupsPayload: { id: string; name: string }[] | undefined = undefined;
+      if (recipientType === 'wa_group') {
+        const groupsFromChecklist = selectedWaGroupIds.map((id) => {
+          const match = waGroups.find((g) => g.id === id);
+          return { id, name: match ? match.name : 'Grup WA' };
+        });
+        const manualGroups = manualWaGroupId
+          .split('\n')
+          .map((id) => id.trim())
+          .filter(Boolean)
+          .map((id) => ({
+            id: id.endsWith('@g.us') ? id : `${id}@g.us`,
+            name: 'Grup Manual',
+          }));
+
+        targetWaGroupsPayload = [...groupsFromChecklist, ...manualGroups];
+        if (targetWaGroupsPayload.length === 0) {
+          setError('Pilih minimal 1 grup WhatsApp atau masukkan ID grup');
+          setLoading(false);
+          return;
+        }
+      }
+
       const res = await fetch('/api/broadcast/instant', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -71,6 +101,7 @@ export default function QuickBroadcastModal({
             type: recipientType,
             targetGroup: recipientType === 'group' ? selectedGroup : undefined,
             customPhones: recipientType === 'custom' ? phones : undefined,
+            targetWaGroups: targetWaGroupsPayload,
           },
           antiBanDelayMin: 3,
           antiBanDelayMax: 6,
@@ -154,9 +185,80 @@ export default function QuickBroadcastModal({
             >
               <option value="all">Semua Kontak ({contacts.length})</option>
               <option value="group">Grup Kontak Tertentu</option>
+              <option value="wa_group">👥 Grup WhatsApp ({waGroups.length} grup)</option>
               <option value="custom">Input Nomor Manual</option>
             </select>
           </div>
+
+          {recipientType === 'wa_group' && (
+            <div className="form-group" style={{ background: 'var(--bg-input)', padding: 12, borderRadius: 'var(--radius-md)', border: '1px solid var(--border-subtle)' }}>
+              <label className="form-label" style={{ fontWeight: 600, color: 'var(--wa-emerald)', marginBottom: 8 }}>
+                Pilih Grup WhatsApp ({selectedWaGroupIds.length} dipilih)
+              </label>
+
+              {waGroups.length === 0 ? (
+                <div style={{ fontSize: '0.82rem', color: 'var(--text-muted)', padding: '6px 0' }}>
+                  Belum ada grup terdeteksi. Pastikan WhatsApp sudah terhubung di dashboard.
+                </div>
+              ) : (
+                <div style={{ maxHeight: 150, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  {waGroups.map((g) => {
+                    const isChecked = selectedWaGroupIds.includes(g.id);
+                    return (
+                      <label
+                        key={g.id}
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: 10,
+                          padding: '6px 10px',
+                          borderRadius: 'var(--radius-sm)',
+                          background: isChecked ? 'rgba(0, 168, 132, 0.15)' : 'rgba(255, 255, 255, 0.03)',
+                          cursor: 'pointer',
+                          fontSize: '0.85rem',
+                          border: isChecked ? '1px solid var(--wa-emerald)' : '1px solid transparent',
+                        }}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={isChecked}
+                          onChange={(e) => {
+                            if (e.target.checked) {
+                              setSelectedWaGroupIds((prev) => [...prev, g.id]);
+                            } else {
+                              setSelectedWaGroupIds((prev) => prev.filter((id) => id !== g.id));
+                            }
+                          }}
+                        />
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                            {g.name}
+                          </div>
+                          <div style={{ fontSize: '0.72rem', color: 'var(--text-dim)' }}>
+                            {g.participantsCount} anggota
+                          </div>
+                        </div>
+                      </label>
+                    );
+                  })}
+                </div>
+              )}
+
+              <div style={{ marginTop: 10, paddingTop: 8, borderTop: '1px solid var(--border-subtle)' }}>
+                <label className="form-label" style={{ fontSize: '0.78rem' }}>
+                  Atau Masukkan Group ID Manual (contoh: 120363025283921829@g.us):
+                </label>
+                <input
+                  type="text"
+                  className="form-input"
+                  style={{ fontSize: '0.82rem', padding: '6px 10px' }}
+                  placeholder="120363025283921829@g.us"
+                  value={manualWaGroupId}
+                  onChange={(e) => setManualWaGroupId(e.target.value)}
+                />
+              </div>
+            </div>
+          )}
 
           {recipientType === 'group' && (
             <div className="form-group">
