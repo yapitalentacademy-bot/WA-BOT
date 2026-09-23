@@ -12,6 +12,7 @@ interface GlobalWhatsAppState {
   userInfo: WhatsAppUserInfo | null;
   authDir: string;
   isInitializing: boolean;
+  contactsMap: Map<string, { id: string; name: string; phone: string }>;
 }
 
 const globalForWA = globalThis as unknown as {
@@ -28,7 +29,12 @@ if (!globalForWA.waState) {
     userInfo: null,
     authDir: AUTH_DIR,
     isInitializing: false,
+    contactsMap: new Map(),
   };
+}
+
+if (!globalForWA.waState.contactsMap) {
+  globalForWA.waState.contactsMap = new Map();
 }
 
 const state = globalForWA.waState;
@@ -151,6 +157,28 @@ export async function initWhatsApp(force = false): Promise<void> {
     state.socket = sock;
 
     sock.ev.on('creds.update', saveCreds);
+
+    sock.ev.on('contacts.upsert', (contacts: any[]) => {
+      for (const c of contacts) {
+        if (c.id && !c.id.endsWith('@g.us') && !c.id.endsWith('@broadcast')) {
+          const phone = c.id.split('@')[0];
+          const name = c.name || c.notify || c.verifiedName || phone;
+          state.contactsMap.set(c.id, { id: c.id, phone, name });
+        }
+      }
+    });
+
+    sock.ev.on('contacts.update', (updates: any[]) => {
+      for (const u of updates) {
+        if (u.id && state.contactsMap.has(u.id)) {
+          const existing = state.contactsMap.get(u.id)!;
+          state.contactsMap.set(u.id, {
+            ...existing,
+            name: u.name || u.notify || u.verifiedName || existing.name,
+          });
+        }
+      }
+    });
 
     sock.ev.on('connection.update', async (update) => {
       const { connection, lastDisconnect, qr } = update;
@@ -324,3 +352,91 @@ export async function getWhatsAppGroups(): Promise<{ id: string; name: string; p
     return [];
   }
 }
+
+// Fetch all discovered contacts from WhatsApp (tracked chats & group participants)
+export async function getWhatsAppContacts(): Promise<Array<{ id: string; phone: string; name: string; source: string }>> {
+  if (!state.socket || state.status !== 'connected') {
+    return [];
+  }
+
+  const results: Array<{ id: string; phone: string; name: string; source: string }> = [];
+  const seenPhones = new Set<string>();
+
+  // 1. From tracked contacts
+  if (state.contactsMap) {
+    for (const [_, c] of state.contactsMap.entries()) {
+      if (c.phone && !seenPhones.has(c.phone)) {
+        seenPhones.add(c.phone);
+        results.push({
+          id: c.id,
+          phone: c.phone,
+          name: c.name || c.phone,
+          source: 'Buku Kontak WhatsApp',
+        });
+      }
+    }
+  }
+
+  // 2. From groups participating (participants)
+  try {
+    const groups = await state.socket.groupFetchAllParticipating();
+    for (const g of Object.values(groups) as any[]) {
+      const groupName = g.subject || 'Grup WA';
+      if (Array.isArray(g.participants)) {
+        for (const p of g.participants) {
+          const rawId = p.id || '';
+          if (rawId && !rawId.endsWith('@g.us')) {
+            const phone = rawId.split(':')[0].split('@')[0];
+            if (phone && !seenPhones.has(phone)) {
+              seenPhones.add(phone);
+              const known = state.contactsMap?.get(rawId);
+              results.push({
+                id: rawId,
+                phone,
+                name: known?.name || `Peserta ${groupName} (${phone.slice(-4)})`,
+                source: groupName,
+              });
+            }
+          }
+        }
+      }
+    }
+  } catch (err) {
+    console.warn('Could not fetch group participants for contacts:', err);
+  }
+
+  return results;
+}
+
+// Fetch participants of a specific group
+export async function getWhatsAppGroupParticipants(groupId: string): Promise<Array<{ id: string; phone: string; name: string; groupName: string }>> {
+  if (!state.socket || state.status !== 'connected') {
+    return [];
+  }
+  try {
+    const groupMeta = await state.socket.groupMetadata(groupId);
+    const groupName = groupMeta.subject || 'Grup WA';
+    const participants: Array<{ id: string; phone: string; name: string; groupName: string }> = [];
+
+    if (Array.isArray(groupMeta.participants)) {
+      for (const p of groupMeta.participants) {
+        const rawId = p.id || '';
+        const phone = rawId.split(':')[0].split('@')[0];
+        if (phone) {
+          const known = state.contactsMap?.get(rawId);
+          participants.push({
+            id: rawId,
+            phone,
+            name: known?.name || `Anggota (${phone.slice(-4)})`,
+            groupName,
+          });
+        }
+      }
+    }
+    return participants;
+  } catch (err) {
+    console.error('Failed to get group metadata for participants:', err);
+    return [];
+  }
+}
+

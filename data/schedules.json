@@ -1,31 +1,8 @@
 [
   {
-    "id": "sch-1790188167395",
-    "title": "Jadwal Kajian Mingguan di Grup",
-    "message": "Halo semua anggota grup, berikut jadwal kegiatan resmi minggu ini.",
-    "attachedFile": null,
-    "recipients": {
-      "type": "wa_group",
-      "targetWaGroups": [
-        {
-          "id": "120363025283921829@g.us",
-          "name": "Grup Pengajian Akbar"
-        }
-      ]
-    },
-    "scheduleType": "weekly",
-    "scheduledTime": "2026-09-23T18:29:27.395Z",
-    "recurringTime": "08:00",
-    "recurringDay": 5,
-    "status": "active",
-    "antiBanDelayMin": 3,
-    "antiBanDelayMax": 7,
-    "createdAt": "2026-09-23T18:29:27.395Z"
-  },
-  {
-    "id": "sch-1790185110484",
-    "title": "Share Dokumen Jadwal Resmi",
-    "message": "Halo {nama}, berikut file dokumen jadwal resmi Anda. Silakan dicek terlampir!",
+    "id": "sch-1790190121824",
+    "title": "Pengumuman Jadwal Kegiatan / Acara",
+    "message": "꧁ঔৣ☬  JADWAL Keislaman  ☬ঔৣ꧂\n * Senin, 21 september 2026_* \n\n☞  𝙹𝚊𝚍𝚠𝚊𝚕 𝙰𝚍𝚣𝚊𝚗 & bangunin subuh \n➢  Adzan            : @~D22_Arsa Dayat_Yogyakarta \nBangunin subuh : @~rapii \n\n☞  𝙹𝚊𝚍𝚠𝚊𝚕 𝙸𝚖𝚊𝚖\n➢ Subuh : @Wily ASGJ Apriyanto 2x\nDzuhur, Ashar   : @Fathan ASGJ \nMagrib, Isya  : @Ihsan ASGJ \n➢  Jadwal Kajian maljum\n☞ @⁨~Kholidsaifullah41⁩ \n\n➢  Jadwal Kultum maljum\n☞  @⁨Yusuf Asgj⁩  \n\n\nISI JIKA DILUAR ASRAMA\nhttps://docs.google.com/forms/d/e/1FAIpQLSfwVnYMCHpgTzT41Qd9Mb9CQe_tb4TkBoUEjpml4ayUYWC04Q/viewform",
     "attachedFile": {
       "id": "file-1790185110383",
       "name": "1790185110381_Jadwal_Kegiatan_Resmi.pdf",
@@ -37,31 +14,22 @@
       "uploadedAt": "2026-09-23T17:38:30.384Z"
     },
     "recipients": {
-      "type": "all"
+      "type": "wa_group",
+      "targetWaGroups": [
+        {
+          "id": "120363406413201305@g.us",
+          "name": "Pengurus ASGJ [2026]"
+        }
+      ]
     },
-    "scheduleType": "weekly",
-    "scheduledTime": "2026-09-23T17:38:30.485Z",
-    "recurringTime": "07:30",
+    "scheduleType": "once",
+    "scheduledTime": "2026-09-23T19:07:00.000Z",
+    "recurringTime": "08:00",
     "recurringDay": 1,
-    "status": "active",
-    "antiBanDelayMin": 3,
-    "antiBanDelayMax": 7,
-    "createdAt": "2026-09-23T17:38:30.485Z"
-  },
-  {
-    "id": "sch-1790185077384",
-    "title": "Jadwal Kajian Subuh",
-    "message": "Halo {nama}, berikut jadwal {kegiatan} Anda pada {waktu}.",
-    "attachedFile": null,
-    "recipients": {
-      "type": "all"
-    },
-    "scheduleType": "daily",
-    "scheduledTime": "2026-09-23T17:37:57.384Z",
-    "recurringTime": "05:00",
-    "status": "active",
-    "antiBanDelayMin": 3,
-    "antiBanDelayMax": 7,
-    "createdAt": "2026-09-23T17:37:57.384Z"
+    "status": "completed",
+    "antiBanDelayMin": 1,
+    "antiBanDelayMax": 2,
+    "createdAt": "2026-09-23T19:02:01.824Z",
+    "lastRun": "2026-09-23T19:07:06.379Z"
   }
 ]
