@@ -41,6 +41,8 @@ export default function ContactManager() {
   const [waGroups, setWaGroups] = useState<WaGroupItem[]>([]);
   const [selectedImportGroupId, setSelectedImportGroupId] = useState('');
   const [customImportTag, setCustomImportTag] = useState('');
+  const [groupSearchQuery, setGroupSearchQuery] = useState('');
+  const [importSourceType, setImportSourceType] = useState<'group' | 'all_wa'>('group');
   const [importingWa, setImportingWa] = useState(false);
   const [importProgress, setImportProgress] = useState<string | null>(null);
 
@@ -82,9 +84,9 @@ export default function ContactManager() {
       }
       if (gData?.groups && Array.isArray(gData.groups)) {
         setWaGroups(gData.groups);
-        if (gData.groups.length > 0 && !selectedImportGroupId) {
-          setSelectedImportGroupId(gData.groups[0].id);
-          setCustomImportTag(gData.groups[0].name);
+        if (gData.groups.length > 0) {
+          setSelectedImportGroupId((prev) => (prev ? prev : gData.groups[0].id));
+          setCustomImportTag((prev) => (prev ? prev : gData.groups[0].name));
         }
       }
     } catch (err) {
@@ -117,6 +119,11 @@ export default function ContactManager() {
     const q = waContactSearch.toLowerCase();
     return c.name.toLowerCase().includes(q) || c.phone.includes(q) || c.source.toLowerCase().includes(q);
   }).slice(0, 30); // show top 30 for snappy rendering
+
+  const filteredWaGroups = waGroups.filter((g) => {
+    if (!groupSearchQuery.trim()) return true;
+    return g.name.toLowerCase().includes(groupSearchQuery.toLowerCase());
+  });
 
   const handleSelectWaContact = (c: WaContactItem) => {
     setName(c.name);
@@ -200,6 +207,43 @@ export default function ContactManager() {
       setTimeout(() => setSuccess(null), 4000);
     } catch (err: any) {
       alert(err?.message || 'Gagal mengimpor kontak grup');
+    } finally {
+      setImportingWa(false);
+      setImportProgress(null);
+    }
+  };
+
+  const handleImportAllWaContacts = async () => {
+    if (waContacts.length === 0) {
+      alert('Tidak ada kontak WhatsApp yang terdeteksi');
+      return;
+    }
+
+    setImportingWa(true);
+    setImportProgress(`Menyimpan ${waContacts.length} kontak WhatsApp ke buku telepon...`);
+    try {
+      const targetTag = customImportTag.trim() || 'Kontak WhatsApp';
+      const contactsToSave = waContacts.map((c) => ({
+        phone: c.phone,
+        name: c.name || 'Kontak WA',
+        group: targetTag,
+        notes: `Diimpor otomatis dari buku telepon WhatsApp`,
+      }));
+
+      const saveRes = await fetch('/api/contacts', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ bulk: true, contacts: contactsToSave }),
+      });
+      const saveData = await saveRes.json();
+      if (!saveRes.ok) throw new Error(saveData.error || 'Gagal menyimpan kontak');
+
+      setSuccess(`✅ ${saveData.count || waContacts.length} kontak WhatsApp berhasil diimpor!`);
+      setShowWaImportModal(false);
+      fetchContacts();
+      setTimeout(() => setSuccess(null), 4000);
+    } catch (err: any) {
+      alert(err?.message || 'Gagal mengimpor kontak');
     } finally {
       setImportingWa(false);
       setImportProgress(null);
@@ -611,41 +655,168 @@ export default function ContactManager() {
       {/* MODAL IMPOR OTOMATIS DARI WHATSAPP (GRUP / BUKU TELEPON) */}
       {showWaImportModal && (
         <div className="modal-overlay" onClick={() => setShowWaImportModal(false)}>
-          <div className="modal-content" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 560 }}>
+          <div className="modal-content" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 580 }}>
             <div className="modal-header">
               <div>
                 <h3>⚡ Impor Kontak Otomatis dari WhatsApp</h3>
                 <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
-                  Impor seluruh anggota grup atau kontak terhubung ke buku telepon aplikasi secara instan
+                  Impor peserta grup atau kontak terhubung ke buku telepon aplikasi secara instan
                 </p>
               </div>
               <button className="close-btn" onClick={() => setShowWaImportModal(false)}>&times;</button>
             </div>
 
-            <div style={{ background: 'var(--bg-input)', padding: 14, borderRadius: 'var(--radius-md)', border: '1px solid var(--border-subtle)', marginBottom: 16 }}>
-              <label className="form-label" style={{ fontWeight: 600, color: 'var(--wa-emerald)', marginBottom: 6 }}>
-                1. Pilih Grup WhatsApp Asal
-              </label>
-              <select
-                className="form-select"
-                value={selectedImportGroupId}
-                onChange={(e) => {
-                  setSelectedImportGroupId(e.target.value);
-                  const matched = waGroups.find((g) => g.id === e.target.value);
-                  if (matched) setCustomImportTag(matched.name);
+            {/* Pilihan Sumber Impor */}
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 16 }}>
+              <button
+                type="button"
+                onClick={() => setImportSourceType('group')}
+                style={{
+                  padding: '10px 12px',
+                  borderRadius: 'var(--radius-sm)',
+                  border: importSourceType === 'group' ? '2px solid var(--wa-emerald)' : '1px solid var(--border-subtle)',
+                  background: importSourceType === 'group' ? 'rgba(0, 168, 132, 0.15)' : 'rgba(255, 255, 255, 0.03)',
+                  color: '#fff',
+                  cursor: 'pointer',
+                  textAlign: 'left',
                 }}
               >
-                {waGroups.map((g) => (
-                  <option key={g.id} value={g.id}>
-                    {g.name} ({g.participantsCount} anggota)
-                  </option>
-                ))}
-              </select>
+                <div style={{ fontWeight: 600, fontSize: '0.88rem' }}>👥 Anggota Grup WA</div>
+                <div style={{ fontSize: '0.74rem', color: 'var(--text-muted)', marginTop: 2 }}>
+                  {waGroups.length > 0 ? `${waGroups.length} grup terdeteksi` : 'Pilih grup spesifik'}
+                </div>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setImportSourceType('all_wa');
+                  if (!customImportTag) setCustomImportTag('Kontak WhatsApp');
+                }}
+                style={{
+                  padding: '10px 12px',
+                  borderRadius: 'var(--radius-sm)',
+                  border: importSourceType === 'all_wa' ? '2px solid var(--wa-emerald)' : '1px solid var(--border-subtle)',
+                  background: importSourceType === 'all_wa' ? 'rgba(0, 168, 132, 0.15)' : 'rgba(255, 255, 255, 0.03)',
+                  color: '#fff',
+                  cursor: 'pointer',
+                  textAlign: 'left',
+                }}
+              >
+                <div style={{ fontWeight: 600, fontSize: '0.88rem' }}>📱 Seluruh Kontak WA</div>
+                <div style={{ fontSize: '0.74rem', color: 'var(--text-muted)', marginTop: 2 }}>
+                  {waContacts.length > 0 ? `${waContacts.length} kontak siap impor` : 'Buku telepon WA'}
+                </div>
+              </button>
             </div>
+
+            {importSourceType === 'group' ? (
+              <div style={{ background: 'var(--bg-input)', padding: 14, borderRadius: 'var(--radius-md)', border: '1px solid var(--border-subtle)', marginBottom: 16 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+                  <label className="form-label" style={{ fontWeight: 600, color: 'var(--wa-emerald)', marginBottom: 0 }}>
+                    Pilih Grup WhatsApp Asal ({waGroups.length} grup terdeteksi)
+                  </label>
+                  <button
+                    type="button"
+                    className="btn btn-secondary btn-sm"
+                    style={{ padding: '3px 8px', fontSize: '0.74rem' }}
+                    onClick={fetchWaData}
+                    disabled={loadingWaContacts}
+                  >
+                    {loadingWaContacts ? '⏳ Memuat...' : '🔄 Sinkronkan Grup'}
+                  </button>
+                </div>
+
+                {loadingWaContacts ? (
+                  <div style={{ padding: '16px', textAlign: 'center', color: 'var(--wa-emerald)', fontSize: '0.85rem' }}>
+                    ⏳ Sedang mendeteksi daftar grup dari WhatsApp... Mohon tunggu sebentar.
+                  </div>
+                ) : waGroups.length === 0 ? (
+                  <div style={{ padding: '14px', borderRadius: 'var(--radius-sm)', background: 'rgba(234, 179, 8, 0.1)', border: '1px solid rgba(234, 179, 8, 0.25)', fontSize: '0.82rem', color: '#facc15' }}>
+                    ⚠️ Belum ada grup WhatsApp yang terbaca. Pastikan WhatsApp sudah terhubung di dashboard utama, lalu klik tombol <strong>🔄 Sinkronkan Grup</strong> di atas.
+                  </div>
+                ) : (
+                  <>
+                    {/* Search box for groups */}
+                    <div style={{ position: 'relative', marginBottom: 8 }}>
+                      <input
+                        type="text"
+                        className="form-input"
+                        style={{ fontSize: '0.82rem', padding: '6px 28px 6px 10px' }}
+                        placeholder="🔍 Cari nama grup (contoh: Adventure, Panitia, IKOR, dsb)..."
+                        value={groupSearchQuery}
+                        onChange={(e) => setGroupSearchQuery(e.target.value)}
+                      />
+                      {groupSearchQuery && (
+                        <button
+                          type="button"
+                          onClick={() => setGroupSearchQuery('')}
+                          style={{
+                            position: 'absolute',
+                            right: 8,
+                            top: '50%',
+                            transform: 'translateY(-50%)',
+                            background: 'none',
+                            border: 'none',
+                            color: 'var(--text-muted)',
+                            cursor: 'pointer',
+                          }}
+                        >
+                          ✕
+                        </button>
+                      )}
+                    </div>
+
+                    <select
+                      className="form-select"
+                      value={selectedImportGroupId}
+                      onChange={(e) => {
+                        setSelectedImportGroupId(e.target.value);
+                        const matched = waGroups.find((g) => g.id === e.target.value);
+                        if (matched) setCustomImportTag(matched.name);
+                      }}
+                    >
+                      <option value="">-- Pilih Salah Satu Grup WhatsApp ({filteredWaGroups.length} grup ditemukan) --</option>
+                      {filteredWaGroups.map((g) => (
+                        <option key={g.id} value={g.id}>
+                          {g.name} ({g.participantsCount} anggota)
+                        </option>
+                      ))}
+                    </select>
+
+                    {selectedImportGroupId && (
+                      <div style={{ marginTop: 8, fontSize: '0.78rem', color: 'var(--text-dim)', display: 'flex', alignItems: 'center', gap: 6 }}>
+                        <span>👥 Target:</span>
+                        <strong style={{ color: '#fff' }}>
+                          {waGroups.find((g) => g.id === selectedImportGroupId)?.name}
+                        </strong>
+                        <span>
+                          ({waGroups.find((g) => g.id === selectedImportGroupId)?.participantsCount} anggota)
+                        </span>
+                      </div>
+                    )}
+                  </>
+                )}
+              </div>
+            ) : (
+              <div style={{ background: 'var(--bg-input)', padding: 14, borderRadius: 'var(--radius-md)', border: '1px solid var(--border-subtle)', marginBottom: 16 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                  <div style={{ fontSize: '1.8rem' }}>📱</div>
+                  <div>
+                    <div style={{ fontWeight: 600, fontSize: '0.9rem', color: 'var(--wa-emerald)' }}>
+                      Impor Seluruh Kontak Buku Telepon WhatsApp
+                    </div>
+                    <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginTop: 2 }}>
+                      {waContacts.length} kontak terdeteksi di akun WhatsApp Anda akan disalin otomatis ke buku telepon aplikasi.
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
 
             <div className="form-group">
               <label className="form-label">
-                2. Beri Label / Tag untuk Kontak yang Diimpor
+                Beri Label / Tag untuk Kontak yang Diimpor
               </label>
               <input
                 type="text"
@@ -655,7 +826,7 @@ export default function ContactManager() {
                 onChange={(e) => setCustomImportTag(e.target.value)}
               />
               <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
-                Semua anggota grup ini akan otomatis dikelompokkan dalam tag ini.
+                Semua kontak hasil impor ini akan otomatis dikelompokkan dalam tag ini.
               </span>
             </div>
 
@@ -691,10 +862,10 @@ export default function ContactManager() {
               <button
                 type="button"
                 className="btn btn-primary"
-                onClick={handleImportFromWaGroup}
-                disabled={importingWa || !selectedImportGroupId}
+                onClick={importSourceType === 'group' ? handleImportFromWaGroup : handleImportAllWaContacts}
+                disabled={importingWa || (importSourceType === 'group' && !selectedImportGroupId)}
               >
-                {importingWa ? 'Mengimpor...' : '📥 Impor Anggota Grup Ini'}
+                {importingWa ? 'Mengimpor...' : importSourceType === 'group' ? '📥 Impor Anggota Grup Ini' : '📥 Impor Semua Kontak WA'}
               </button>
             </div>
           </div>
