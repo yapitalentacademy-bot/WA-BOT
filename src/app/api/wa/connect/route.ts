@@ -17,7 +17,7 @@ export async function POST(req: Request) {
     if (action === 'disconnect') {
       await disconnectWhatsApp(accountId);
       const status = await getWhatsAppStatus(accountId);
-      return NextResponse.json({ message: `Akun ${accountId} diputus`, status: 'disconnected', ...status });
+      return NextResponse.json({ message: `Akun ${accountId} diputus`, ...status });
     } else if (action === 'reconnect') {
       await disconnectWhatsApp(accountId);
       await initWhatsApp(accountId, true);
