@@ -70,16 +70,18 @@ export async function sendBroadcastToRecipient(
   };
 
   try {
+    const senderAcc = schedule.recipients.senderAccountId || 'rotation';
     if (schedule.attachedFile) {
       await sendWhatsAppFile(
         contact.phone,
         schedule.attachedFile.localPath,
         schedule.attachedFile.originalName,
         schedule.attachedFile.mimeType,
-        personalizedText
+        personalizedText,
+        senderAcc
       );
     } else {
-      await sendWhatsAppText(contact.phone, personalizedText);
+      await sendWhatsAppText(contact.phone, personalizedText, senderAcc);
     }
     log.status = 'success';
   } catch (error: any) {

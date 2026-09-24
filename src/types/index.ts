@@ -6,6 +6,14 @@ export interface WhatsAppUserInfo {
   phone?: string;
 }
 
+export interface WhatsAppAccountInfo {
+  id: string; // 'acc_1', 'acc_2', 'acc_3', 'acc_4', 'acc_5'
+  label: string; // 'Akun 1 (Utama)', 'Akun 2', etc.
+  status: WhatsAppStatus;
+  qrCodeDataUrl: string | null;
+  userInfo: WhatsAppUserInfo | null;
+}
+
 export interface AttachedFile {
   id: string;
   name: string;
@@ -56,6 +64,7 @@ export interface BroadcastSchedule {
     customPhones?: string[]; // array of phone numbers
     targetWaGroups?: { id: string; name: string }[]; // array of WhatsApp Groups
     selectedContacts?: { name: string; phone: string }[]; // array of selected contacts
+    senderAccountId?: string; // 'rotation' | 'acc_1' | 'acc_2' | etc.
   };
   scheduleType: ScheduleRepeatType;
   scheduledTime: string; // ISO string e.g. 2026-09-24T08:00

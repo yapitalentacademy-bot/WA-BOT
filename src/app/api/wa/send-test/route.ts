@@ -4,7 +4,7 @@ import { Storage } from '@/lib/storage';
 
 export async function POST(req: Request) {
   try {
-    const { phone, message, fileId } = await req.json();
+    const { phone, message, fileId, accountId } = await req.json();
 
     if (!phone) {
       return NextResponse.json({ error: 'Nomor telepon penerima wajib diisi' }, { status: 400 });
@@ -22,9 +22,9 @@ export async function POST(req: Request) {
         return NextResponse.json({ error: 'File tidak ditemukan' }, { status: 404 });
       }
       attachmentName = file.originalName;
-      await sendWhatsAppFile(phone, file.localPath, file.originalName, file.mimeType, message || '');
+      await sendWhatsAppFile(phone, file.localPath, file.originalName, file.mimeType, message || '', accountId);
     } else {
-      await sendWhatsAppText(phone, message);
+      await sendWhatsAppText(phone, message, accountId);
     }
 
     // Log the test send

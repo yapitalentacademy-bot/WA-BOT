@@ -33,17 +33,35 @@ export default function QuickBroadcastModal({
   const [selectedContacts, setSelectedContacts] = useState<{ name: string; phone: string }[]>([]);
   const [contactSearchQuery, setContactSearchQuery] = useState('');
 
+  // Multi-Account Sender
+  const [senderAccountId, setSenderAccountId] = useState<string>('rotation');
+  const [connectedAccounts, setConnectedAccounts] = useState<{ id: string; label: string; phone?: string; status: string }[]>([]);
+
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     if (isOpen) {
       if (initialFile) setAttachedFile(initialFile);
+      setSenderAccountId('rotation');
       Promise.all([
         fetch('/api/contacts').then((res) => res.json()),
         fetch('/api/wa/groups').then((res) => res.json()),
         fetch('/api/wa/contacts').then((res) => res.json()),
-      ]).then(([contactsData, waGroupsData, waContactsData]) => {
+        fetch('/api/wa/status').then((res) => res.json()),
+      ]).then(([contactsData, waGroupsData, waContactsData, waStatusData]) => {
+        if (waStatusData?.accounts && Array.isArray(waStatusData.accounts)) {
+          setConnectedAccounts(
+            waStatusData.accounts
+              .filter((a: any) => a.status === 'connected')
+              .map((a: any) => ({
+                id: a.id,
+                label: a.label,
+                phone: a.userInfo?.id ? a.userInfo.id.split('@')[0].split(':')[0] : undefined,
+                status: a.status,
+              }))
+          );
+        }
         if (Array.isArray(contactsData)) {
           setContacts(contactsData);
           const uGroups = Array.from(new Set(contactsData.map((c: Contact) => c.group).filter(Boolean))) as string[];
@@ -180,6 +198,7 @@ export default function QuickBroadcastModal({
           attachedFile,
           recipients: {
             type: recipientType,
+            senderAccountId,
             targetGroup: recipientType === 'group' ? selectedGroup : undefined,
             customPhones: recipientType === 'custom' ? phones : undefined,
             targetWaGroups: targetWaGroupsPayload,
@@ -229,6 +248,35 @@ export default function QuickBroadcastModal({
               onChange={(e) => setTitle(e.target.value)}
               required
             />
+          </div>
+
+          {/* Pilihan Akun WhatsApp Pengirim */}
+          <div className="form-group">
+            <label className="form-label" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <span>Akun WhatsApp Pengirim</span>
+              {connectedAccounts.length > 0 && (
+                <span style={{ fontSize: '0.72rem', color: 'var(--wa-emerald)', fontWeight: 600 }}>
+                  ✨ {connectedAccounts.length} Akun Terhubung
+                </span>
+              )}
+            </label>
+            <select
+              className="form-select"
+              value={senderAccountId}
+              onChange={(e) => setSenderAccountId(e.target.value)}
+            >
+              <option value="rotation">
+                🔄 Rotasi Otomatis ({connectedAccounts.length > 0 ? `Bagi Beban ke ${connectedAccounts.length} Akun Aktif` : 'Semua Akun Aktif'}) - Paling Aman
+              </option>
+              {connectedAccounts.map((acc) => (
+                <option key={acc.id} value={acc.id}>
+                  📱 {acc.label} {acc.phone ? `(+${acc.phone})` : ''}
+                </option>
+              ))}
+            </select>
+            <div style={{ fontSize: '0.73rem', color: 'var(--text-dim)', marginTop: 4 }}>
+              Pilih satu nomor akun tertentu atau biarkan <strong>Rotasi Otomatis</strong> untuk membagi pengiriman pesan ke nomor-nomor yang aktif secara bergantian.
+            </div>
           </div>
 
           {attachedFile && (

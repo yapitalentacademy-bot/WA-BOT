@@ -46,6 +46,10 @@ export default function ScheduleModal({ isOpen, onClose, onSuccess, initialFile,
   const [manualWaGroupId, setManualWaGroupId] = useState('');
   const [loadingWaGroups, setLoadingWaGroups] = useState(false);
 
+  // Multi-Account Sender
+  const [senderAccountId, setSenderAccountId] = useState<string>('rotation');
+  const [connectedAccounts, setConnectedAccounts] = useState<{ id: string; label: string; phone?: string; status: string }[]>([]);
+
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -83,6 +87,7 @@ export default function ScheduleModal({ isOpen, onClose, onSuccess, initialFile,
         // Recipients
         const rType = editingSchedule.recipients?.type || 'contacts';
         setRecipientType(rType);
+        setSenderAccountId(editingSchedule.recipients?.senderAccountId || 'rotation');
         if (rType === 'contacts') {
           setSelectedContacts(editingSchedule.recipients?.selectedContacts || []);
         } else if (rType === 'wa_group') {
@@ -97,6 +102,7 @@ export default function ScheduleModal({ isOpen, onClose, onSuccess, initialFile,
         setTitle('');
         setMessage('');
         setScheduleType('once');
+        setSenderAccountId('rotation');
         const d = new Date(Date.now() + 10 * 60 * 1000);
         const yyyy = d.getFullYear();
         const mm = String(d.getMonth() + 1).padStart(2, '0');
@@ -119,20 +125,35 @@ export default function ScheduleModal({ isOpen, onClose, onSuccess, initialFile,
 
   const fetchData = async () => {
     try {
-      const [tplRes, filesRes, contactsRes, waGroupsRes, waContactsRes] = await Promise.all([
+      const [tplRes, filesRes, contactsRes, waGroupsRes, waContactsRes, waStatusRes] = await Promise.all([
         fetch('/api/templates'),
         fetch('/api/files'),
         fetch('/api/contacts'),
         fetch('/api/wa/groups'),
         fetch('/api/wa/contacts'),
+        fetch('/api/wa/status'),
       ]);
-      const [tplData, filesData, contactsData, waGroupsData, waContactsData] = await Promise.all([
+      const [tplData, filesData, contactsData, waGroupsData, waContactsData, waStatusData] = await Promise.all([
         tplRes.json(),
         filesRes.json(),
         contactsRes.json(),
         waGroupsRes.json(),
         waContactsRes.json(),
+        waStatusRes.json(),
       ]);
+
+      if (waStatusData?.accounts && Array.isArray(waStatusData.accounts)) {
+        setConnectedAccounts(
+          waStatusData.accounts
+            .filter((a: any) => a.status === 'connected')
+            .map((a: any) => ({
+              id: a.id,
+              label: a.label,
+              phone: a.userInfo?.id ? a.userInfo.id.split('@')[0].split(':')[0] : undefined,
+              status: a.status,
+            }))
+        );
+      }
 
       setTemplates(Array.isArray(tplData) ? tplData : []);
       setAvailableFiles(Array.isArray(filesData) ? filesData : []);
@@ -350,6 +371,7 @@ export default function ScheduleModal({ isOpen, onClose, onSuccess, initialFile,
         attachedFile,
         recipients: {
           type: recipientType,
+          senderAccountId,
           targetGroup: recipientType === 'group' ? selectedGroup : undefined,
           customPhones: recipientType === 'custom' ? phonesArray : undefined,
           targetWaGroups: targetWaGroupsPayload,
@@ -554,6 +576,35 @@ export default function ScheduleModal({ isOpen, onClose, onSuccess, initialFile,
                     )}
                   </div>
                 )}
+              </div>
+
+              {/* Pilihan Akun WhatsApp Pengirim */}
+              <div className="form-group">
+                <label className="form-label" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <span>Akun WhatsApp Pengirim</span>
+                  {connectedAccounts.length > 0 && (
+                    <span style={{ fontSize: '0.72rem', color: 'var(--wa-emerald)', fontWeight: 600 }}>
+                      ✨ {connectedAccounts.length} Akun Terhubung
+                    </span>
+                  )}
+                </label>
+                <select
+                  className="form-select"
+                  value={senderAccountId}
+                  onChange={(e) => setSenderAccountId(e.target.value)}
+                >
+                  <option value="rotation">
+                    🔄 Rotasi Otomatis ({connectedAccounts.length > 0 ? `Bagi Beban ke ${connectedAccounts.length} Akun Aktif` : 'Semua Akun Aktif'}) - Paling Aman
+                  </option>
+                  {connectedAccounts.map((acc) => (
+                    <option key={acc.id} value={acc.id}>
+                      📱 {acc.label} {acc.phone ? `(+${acc.phone})` : ''}
+                    </option>
+                  ))}
+                </select>
+                <div style={{ fontSize: '0.73rem', color: 'var(--text-dim)', marginTop: 4 }}>
+                  Pilih satu nomor akun tertentu atau biarkan <strong>Rotasi Otomatis</strong> agar pesan dikirim bergantian antar nomor aktif (mencegah banned WA).
+                </div>
               </div>
 
               {/* 4. Tipe Pengiriman Jadwal */}

@@ -2,10 +2,13 @@ import path from 'path';
 import fs from 'fs';
 import QRCode from 'qrcode';
 import pino from 'pino';
-import { WhatsAppStatus, WhatsAppUserInfo } from '@/types';
+import { WhatsAppStatus, WhatsAppUserInfo, WhatsAppAccountInfo } from '@/types';
 
-// Global singleton pattern to prevent multiple socket connections during Next.js hot-reloads
-interface GlobalWhatsAppState {
+export const MAX_WA_ACCOUNTS = 5;
+
+export interface WhatsAppAccountState {
+  id: string; // 'acc_1', 'acc_2', 'acc_3', 'acc_4', 'acc_5'
+  label: string;
   socket: any | null;
   status: WhatsAppStatus;
   qrCodeDataUrl: string | null;
@@ -15,29 +18,105 @@ interface GlobalWhatsAppState {
   contactsMap: Map<string, { id: string; name: string; phone: string }>;
 }
 
+interface MultiAccountWhatsAppState {
+  accounts: Map<string, WhatsAppAccountState>;
+  roundRobinIndex: number;
+}
+
 const globalForWA = globalThis as unknown as {
-  waState?: GlobalWhatsAppState;
+  multiWaState?: MultiAccountWhatsAppState;
 };
 
-const AUTH_DIR = path.join(process.cwd(), '.baileys_auth');
+const BASE_AUTH_DIR = path.join(process.cwd(), '.baileys_auth');
+const LABELS_FILE = path.join(process.cwd(), 'data', 'wa_accounts.json');
 
-if (!globalForWA.waState) {
-  globalForWA.waState = {
-    socket: null,
-    status: 'disconnected',
-    qrCodeDataUrl: null,
-    userInfo: null,
-    authDir: AUTH_DIR,
-    isInitializing: false,
-    contactsMap: new Map(),
+// Default initial labels
+const DEFAULT_ACCOUNT_LABELS: Record<string, string> = {
+  acc_1: 'Akun 1 (Utama)',
+  acc_2: 'Akun 2',
+  acc_3: 'Akun 3',
+  acc_4: 'Akun 4',
+  acc_5: 'Akun 5',
+};
+
+function loadAccountLabels(): Record<string, string> {
+  try {
+    if (fs.existsSync(LABELS_FILE)) {
+      const data = JSON.parse(fs.readFileSync(LABELS_FILE, 'utf-8'));
+      return { ...DEFAULT_ACCOUNT_LABELS, ...data };
+    }
+  } catch (e) {
+    console.error('Error loading account labels:', e);
+  }
+  return { ...DEFAULT_ACCOUNT_LABELS };
+}
+
+function saveAccountLabels(labels: Record<string, string>): void {
+  try {
+    const dir = path.dirname(LABELS_FILE);
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(LABELS_FILE, JSON.stringify(labels, null, 2), 'utf-8');
+  } catch (e) {
+    console.error('Error saving account labels:', e);
+  }
+}
+
+// Ensure migration from old single-account auth directory to acc_1
+function migrateOldAuthIfNeeded() {
+  try {
+    const oldCreds = path.join(BASE_AUTH_DIR, 'creds.json');
+    const acc1Dir = path.join(BASE_AUTH_DIR, 'acc_1');
+    const acc1Creds = path.join(acc1Dir, 'creds.json');
+
+    if (fs.existsSync(oldCreds) && !fs.existsSync(acc1Creds)) {
+      if (!fs.existsSync(acc1Dir)) fs.mkdirSync(acc1Dir, { recursive: true });
+      const entries = fs.readdirSync(BASE_AUTH_DIR);
+      for (const entry of entries) {
+        const fullPath = path.join(BASE_AUTH_DIR, entry);
+        if (entry.startsWith('acc_')) continue;
+        if (fs.statSync(fullPath).isFile()) {
+          const dest = path.join(acc1Dir, entry);
+          if (!fs.existsSync(dest)) {
+            fs.copyFileSync(fullPath, dest);
+          }
+        }
+      }
+      console.log('[MULTI-WA] Migrated existing single-account session to acc_1');
+    }
+  } catch (err) {
+    console.error('[MULTI-WA] Migration error:', err);
+  }
+}
+
+// Initialize Global State
+if (!globalForWA.multiWaState) {
+  migrateOldAuthIfNeeded();
+  const labels = loadAccountLabels();
+  const accountsMap = new Map<string, WhatsAppAccountState>();
+
+  for (let i = 1; i <= MAX_WA_ACCOUNTS; i++) {
+    const accId = `acc_${i}`;
+    const authDir = path.join(BASE_AUTH_DIR, accId);
+    accountsMap.set(accId, {
+      id: accId,
+      label: labels[accId] || `Akun ${i}`,
+      socket: null,
+      status: 'disconnected',
+      qrCodeDataUrl: null,
+      userInfo: null,
+      authDir,
+      isInitializing: false,
+      contactsMap: new Map(),
+    });
+  }
+
+  globalForWA.multiWaState = {
+    accounts: accountsMap,
+    roundRobinIndex: 0,
   };
 }
 
-if (!globalForWA.waState.contactsMap) {
-  globalForWA.waState.contactsMap = new Map();
-}
-
-const state = globalForWA.waState;
+const state = globalForWA.multiWaState;
 
 // Format phone number or Group ID to WhatsApp JID format
 export function formatToWhatsAppJid(target: string): string {
@@ -45,21 +124,16 @@ export function formatToWhatsAppJid(target: string): string {
   if (trimmed.endsWith('@g.us') || trimmed.endsWith('@s.whatsapp.net')) {
     return trimmed;
   }
-  // Check if it's a numeric group ID (groups are like 120363025283921829 or 6281234-1234)
   if (trimmed.includes('-') || (trimmed.length >= 16 && !trimmed.startsWith('0') && !trimmed.startsWith('62') && !trimmed.startsWith('+'))) {
     return `${trimmed}@g.us`;
   }
 
-  // Strip any non-digit characters (+, -, spaces)
   let clean = trimmed.replace(/\D/g, '');
-  
-  // Convert 08xx to 628xx
   if (clean.startsWith('0')) {
     clean = '62' + clean.slice(1);
   } else if (clean.startsWith('8')) {
     clean = '62' + clean;
   }
-  
   return `${clean}@s.whatsapp.net`;
 }
 
@@ -73,64 +147,121 @@ export function cleanPhoneNumber(phone: string): string {
   return clean;
 }
 
-export async function getWhatsAppStatus(): Promise<{
+// Get status of all accounts (or specific account)
+export async function getWhatsAppStatus(accountId?: string): Promise<{
+  accounts: WhatsAppAccountInfo[];
+  connectedCount: number;
+  maxAccounts: number;
   status: WhatsAppStatus;
   qrCodeDataUrl: string | null;
   userInfo: WhatsAppUserInfo | null;
+  activeAccount: WhatsAppAccountInfo | null;
 }> {
+  const accountList: WhatsAppAccountInfo[] = [];
+  let connectedCount = 0;
+
+  for (let i = 1; i <= MAX_WA_ACCOUNTS; i++) {
+    const acc = state.accounts.get(`acc_${i}`);
+    if (acc) {
+      if (acc.status === 'connected') connectedCount++;
+      accountList.push({
+        id: acc.id,
+        label: acc.label,
+        status: acc.status,
+        qrCodeDataUrl: acc.qrCodeDataUrl,
+        userInfo: acc.userInfo,
+      });
+    }
+  }
+
+  // Primary or target account for backward compatibility
+  const targetAcc = accountId ? state.accounts.get(accountId) : (state.accounts.get('acc_1') || accountList[0]);
+  const activeConnected = Array.from(state.accounts.values()).find((a) => a.status === 'connected');
+  const displayAcc = targetAcc || activeConnected || accountList[0];
+
   return {
-    status: state.status,
-    qrCodeDataUrl: state.qrCodeDataUrl,
-    userInfo: state.userInfo,
+    accounts: accountList,
+    connectedCount,
+    maxAccounts: MAX_WA_ACCOUNTS,
+    status: displayAcc?.status || 'disconnected',
+    qrCodeDataUrl: displayAcc?.qrCodeDataUrl || null,
+    userInfo: displayAcc?.userInfo || null,
+    activeAccount: displayAcc ? {
+      id: displayAcc.id,
+      label: displayAcc.label,
+      status: displayAcc.status,
+      qrCodeDataUrl: displayAcc.qrCodeDataUrl,
+      userInfo: displayAcc.userInfo,
+    } : null,
   };
 }
 
-export async function disconnectWhatsApp(): Promise<void> {
-  if (state.socket) {
+// Rename an account label
+export async function renameWhatsAppAccount(accountId: string, newLabel: string): Promise<void> {
+  const acc = state.accounts.get(accountId);
+  if (!acc) throw new Error(`Akun ${accountId} tidak ditemukan`);
+  acc.label = newLabel.trim() || acc.label;
+
+  const labels = loadAccountLabels();
+  labels[accountId] = acc.label;
+  saveAccountLabels(labels);
+}
+
+// Disconnect a specific WhatsApp account
+export async function disconnectWhatsApp(accountId = 'acc_1'): Promise<void> {
+  const acc = state.accounts.get(accountId);
+  if (!acc) return;
+
+  if (acc.socket) {
     try {
-      await state.socket.logout();
+      await acc.socket.logout();
     } catch {
       try {
-        state.socket.end(new Error('Manual disconnect'));
+        acc.socket.end(new Error('Manual disconnect'));
       } catch {}
     }
   }
 
-  state.socket = null;
-  state.status = 'disconnected';
-  state.qrCodeDataUrl = null;
-  state.userInfo = null;
-  state.isInitializing = false;
+  acc.socket = null;
+  acc.status = 'disconnected';
+  acc.qrCodeDataUrl = null;
+  acc.userInfo = null;
+  acc.isInitializing = false;
 
-  // Clean auth folder so next login shows a fresh QR code
-  if (fs.existsSync(AUTH_DIR)) {
+  // Clean auth folder so next login shows fresh QR code
+  if (fs.existsSync(acc.authDir)) {
     try {
-      fs.rmSync(AUTH_DIR, { recursive: true, force: true });
+      fs.rmSync(acc.authDir, { recursive: true, force: true });
     } catch (err) {
-      console.error('Error clearing auth directory:', err);
+      console.error(`Error clearing auth directory for ${accountId}:`, err);
     }
   }
 }
 
-export async function initWhatsApp(force = false): Promise<void> {
-  if (state.status === 'connected' && !force && state.socket) {
+// Connect a specific WhatsApp account
+export async function initWhatsApp(accountId = 'acc_1', force = false): Promise<void> {
+  const acc = state.accounts.get(accountId);
+  if (!acc) {
+    throw new Error(`Akun ${accountId} tidak valid. Maksimal ${MAX_WA_ACCOUNTS} akun.`);
+  }
+
+  if (acc.status === 'connected' && !force && acc.socket) {
     return;
   }
 
-  if (state.isInitializing && !force) {
+  if (acc.isInitializing && !force) {
     return;
   }
 
-  state.isInitializing = true;
-  state.status = 'connecting';
-  state.qrCodeDataUrl = null;
+  acc.isInitializing = true;
+  acc.status = 'connecting';
+  acc.qrCodeDataUrl = null;
 
   try {
-    if (!fs.existsSync(AUTH_DIR)) {
-      fs.mkdirSync(AUTH_DIR, { recursive: true });
+    if (!fs.existsSync(acc.authDir)) {
+      fs.mkdirSync(acc.authDir, { recursive: true });
     }
 
-    // Dynamic import to prevent client-side or build-time issues
     const baileys = await import('@whiskeysockets/baileys');
     const {
       default: makeWASocket,
@@ -139,9 +270,9 @@ export async function initWhatsApp(force = false): Promise<void> {
       fetchLatestBaileysVersion,
     } = baileys;
 
-    const { state: authState, saveCreds } = await useMultiFileAuthState(AUTH_DIR);
+    const { state: authState, saveCreds } = await useMultiFileAuthState(acc.authDir);
     const { version, isLatest } = await fetchLatestBaileysVersion();
-    console.log(`Using Baileys v${version.join('.')}, isLatest: ${isLatest}`);
+    console.log(`[MULTI-WA] [${acc.label}] Baileys v${version.join('.')}, isLatest: ${isLatest}`);
 
     const logger = pino({ level: 'silent' });
 
@@ -150,11 +281,11 @@ export async function initWhatsApp(force = false): Promise<void> {
       logger,
       auth: authState,
       printQRInTerminal: false,
-      browser: ['Share Otomatis', 'Chrome', '1.0.0'],
+      browser: [`Share Otomatis (${acc.label})`, 'Chrome', '1.0.0'],
       syncFullHistory: false,
     });
 
-    state.socket = sock;
+    acc.socket = sock;
 
     sock.ev.on('creds.update', saveCreds);
 
@@ -163,16 +294,16 @@ export async function initWhatsApp(force = false): Promise<void> {
         if (c.id && !c.id.endsWith('@g.us') && !c.id.endsWith('@broadcast')) {
           const phone = c.id.split('@')[0];
           const name = c.name || c.notify || c.verifiedName || phone;
-          state.contactsMap.set(c.id, { id: c.id, phone, name });
+          acc.contactsMap.set(c.id, { id: c.id, phone, name });
         }
       }
     });
 
     sock.ev.on('contacts.update', (updates: any[]) => {
       for (const u of updates) {
-        if (u.id && state.contactsMap.has(u.id)) {
-          const existing = state.contactsMap.get(u.id)!;
-          state.contactsMap.set(u.id, {
+        if (u.id && acc.contactsMap.has(u.id)) {
+          const existing = acc.contactsMap.get(u.id)!;
+          acc.contactsMap.set(u.id, {
             ...existing,
             name: u.name || u.notify || u.verifiedName || existing.name,
           });
@@ -184,9 +315,9 @@ export async function initWhatsApp(force = false): Promise<void> {
       const { connection, lastDisconnect, qr } = update;
 
       if (qr) {
-        state.status = 'waiting_qr';
+        acc.status = 'waiting_qr';
         try {
-          state.qrCodeDataUrl = await QRCode.toDataURL(qr, {
+          acc.qrCodeDataUrl = await QRCode.toDataURL(qr, {
             margin: 2,
             scale: 7,
             color: {
@@ -195,107 +326,126 @@ export async function initWhatsApp(force = false): Promise<void> {
             },
           });
         } catch (err) {
-          console.error('Error generating QR data URL:', err);
+          console.error(`[MULTI-WA] [${acc.label}] Error generating QR:`, err);
         }
       }
 
       if (connection === 'close') {
         const statusCode = (lastDisconnect?.error as any)?.output?.statusCode;
         const shouldReconnect = statusCode !== DisconnectReason.loggedOut;
-        console.log('WA connection closed. Reason:', statusCode, 'Reconnect:', shouldReconnect);
+        console.log(`[MULTI-WA] [${acc.label}] WA connection closed. Code:`, statusCode, 'Reconnect:', shouldReconnect);
 
-        state.socket = null;
-        state.status = 'disconnected';
-        state.qrCodeDataUrl = null;
-        state.userInfo = null;
-        state.isInitializing = false;
+        acc.socket = null;
+        acc.status = 'disconnected';
+        acc.qrCodeDataUrl = null;
+        acc.userInfo = null;
+        acc.isInitializing = false;
 
         if (shouldReconnect) {
           setTimeout(() => {
-            initWhatsApp();
+            initWhatsApp(accountId);
           }, 3000);
         }
       } else if (connection === 'open') {
-        state.status = 'connected';
-        state.qrCodeDataUrl = null;
-        state.isInitializing = false;
+        acc.status = 'connected';
+        acc.qrCodeDataUrl = null;
+        acc.isInitializing = false;
 
         const userJid = sock.user?.id || '';
         const cleanUserPhone = userJid.split(':')[0] || userJid.split('@')[0];
 
-        state.userInfo = {
+        acc.userInfo = {
           id: userJid,
-          name: sock.user?.name || 'WhatsApp User',
+          name: sock.user?.name || acc.label,
           phone: cleanUserPhone,
         };
 
-        console.log('WhatsApp Connected successfully as:', cleanUserPhone);
+        console.log(`[MULTI-WA] [${acc.label}] WhatsApp Connected as:`, cleanUserPhone);
       }
     });
   } catch (error) {
-    console.error('Failed to initialize WhatsApp socket:', error);
-    state.status = 'disconnected';
-    state.isInitializing = false;
+    console.error(`[MULTI-WA] [${acc.label}] Failed to initialize socket:`, error);
+    acc.status = 'disconnected';
+    acc.isInitializing = false;
   }
 }
 
-// Resolve destination JID (checking onWhatsApp for phone numbers)
-export async function resolveWhatsAppJid(target: string): Promise<string> {
+// Select the best socket for sending: preferred or round-robin rotation among connected accounts
+export function getActiveSocket(preferredAccountId?: string): { socket: any; account: WhatsAppAccountState } {
+  const connectedAccounts = Array.from(state.accounts.values()).filter(
+    (a) => a.status === 'connected' && a.socket
+  );
+
+  if (connectedAccounts.length === 0) {
+    throw new Error('Tidak ada akun WhatsApp yang terhubung. Silakan hubungkan minimal 1 akun di dashboard.');
+  }
+
+  if (preferredAccountId && preferredAccountId !== 'rotation') {
+    const found = connectedAccounts.find((a) => a.id === preferredAccountId);
+    if (found) return { socket: found.socket, account: found };
+  }
+
+  // Round-robin selection
+  const idx = state.roundRobinIndex % connectedAccounts.length;
+  state.roundRobinIndex = (state.roundRobinIndex + 1) % connectedAccounts.length;
+  const chosen = connectedAccounts[idx];
+  return { socket: chosen.socket, account: chosen };
+}
+
+// Resolve destination JID
+export async function resolveWhatsAppJid(target: string, sock?: any): Promise<string> {
   const formatted = formatToWhatsAppJid(target);
   if (formatted.endsWith('@g.us')) {
     return formatted;
   }
 
-  if (state.socket) {
+  if (sock) {
     try {
       const clean = formatted.replace('@s.whatsapp.net', '');
-      const results = await state.socket.onWhatsApp(clean);
+      const results = await sock.onWhatsApp(clean);
       const check = results?.[0];
       if (check && check.exists && check.jid) {
-        console.log(`[WA JID] Verified +${clean} on WhatsApp: ${check.jid}`);
         return check.jid;
-      } else {
-        console.warn(`[WA JID] Warning: +${clean} may not be registered on WhatsApp`);
       }
     } catch (e) {
-      console.warn('[WA JID] onWhatsApp check skipped/failed:', e);
+      // ignore
     }
   }
   return formatted;
 }
 
 // Send Text Message
-export async function sendWhatsAppText(toPhone: string, text: string): Promise<any> {
-  if (!state.socket || state.status !== 'connected') {
-    throw new Error('WhatsApp belum terhubung. Silakan hubungkan terlebih dahulu di dashboard.');
-  }
-
-  const jid = await resolveWhatsAppJid(toPhone);
-  console.log(`[WA SEND] Mengirim pesan teks ke JID: ${jid}`);
-  const result = await state.socket.sendMessage(jid, { text });
+export async function sendWhatsAppText(
+  toPhone: string,
+  text: string,
+  preferredAccountId?: string
+): Promise<any> {
+  const { socket, account } = getActiveSocket(preferredAccountId);
+  const jid = await resolveWhatsAppJid(toPhone, socket);
+  console.log(`[WA SEND] [${account.label} - +${account.userInfo?.phone || ''}] Mengirim teks ke ${jid}`);
+  const result = await socket.sendMessage(jid, { text });
   console.log(`[WA SEND] Pesan berhasil dikirim. Key ID: ${result?.key?.id}`);
   return result;
 }
 
-// Send File / Media / Document with optional caption
+// Send File / Media / Document
 export async function sendWhatsAppFile(
   toPhone: string,
   filePath: string,
   fileName: string,
   mimeType: string,
-  caption?: string
+  caption?: string,
+  preferredAccountId?: string
 ): Promise<any> {
-  if (!state.socket || state.status !== 'connected') {
-    throw new Error('WhatsApp belum terhubung. Silakan hubungkan terlebih dahulu di dashboard.');
-  }
+  const { socket, account } = getActiveSocket(preferredAccountId);
 
   if (!fs.existsSync(filePath)) {
     throw new Error(`File tidak ditemukan di server: ${filePath}`);
   }
 
   const fileBuffer = fs.readFileSync(filePath);
-  const jid = await resolveWhatsAppJid(toPhone);
-  console.log(`[WA SEND] Mengirim file "${fileName}" (${mimeType}) ke JID: ${jid}`);
+  const jid = await resolveWhatsAppJid(toPhone, socket);
+  console.log(`[WA SEND] [${account.label} - +${account.userInfo?.phone || ''}] Mengirim file "${fileName}" ke ${jid}`);
 
   const isImage = mimeType.startsWith('image/');
   const isVideo = mimeType.startsWith('video/');
@@ -303,29 +453,28 @@ export async function sendWhatsAppFile(
 
   let result;
   if (isImage) {
-    result = await state.socket.sendMessage(jid, {
+    result = await socket.sendMessage(jid, {
       image: fileBuffer,
       caption: caption || undefined,
       fileName,
     });
   } else if (isVideo) {
-    result = await state.socket.sendMessage(jid, {
+    result = await socket.sendMessage(jid, {
       video: fileBuffer,
       caption: caption || undefined,
       fileName,
     });
   } else if (isAudio) {
-    result = await state.socket.sendMessage(jid, {
+    result = await socket.sendMessage(jid, {
       audio: fileBuffer,
       mimetype: mimeType,
       fileName,
     });
   } else {
-    // PDF, DOCX, XLSX, etc. sent as document
-    result = await state.socket.sendMessage(jid, {
+    result = await socket.sendMessage(jid, {
       document: fileBuffer,
       mimetype: mimeType,
-      fileName: fileName,
+      fileName,
       caption: caption || undefined,
     });
   }
@@ -334,109 +483,138 @@ export async function sendWhatsAppFile(
   return result;
 }
 
-// Fetch all participating WhatsApp Groups
-export async function getWhatsAppGroups(): Promise<{ id: string; name: string; participantsCount: number }[]> {
-  if (!state.socket || state.status !== 'connected') {
-    return [];
+// Fetch WhatsApp Groups (across connected accounts or specific account)
+export async function getWhatsAppGroups(preferredAccountId?: string): Promise<{ id: string; name: string; participantsCount: number }[]> {
+  const connectedAccounts = Array.from(state.accounts.values()).filter(
+    (a) => a.status === 'connected' && a.socket
+  );
+
+  if (connectedAccounts.length === 0) return [];
+
+  const targets = preferredAccountId
+    ? connectedAccounts.filter((a) => a.id === preferredAccountId)
+    : connectedAccounts;
+
+  const groupsMap = new Map<string, { id: string; name: string; participantsCount: number }>();
+
+  for (const acc of targets) {
+    try {
+      const accGroups = await acc.socket.groupFetchAllParticipating();
+      for (const g of Object.values(accGroups) as any[]) {
+        if (!groupsMap.has(g.id)) {
+          groupsMap.set(g.id, {
+            id: g.id,
+            name: g.subject || 'Grup WhatsApp',
+            participantsCount: Array.isArray(g.participants) ? g.participants.length : 0,
+          });
+        }
+      }
+    } catch (e) {
+      console.warn(`[MULTI-WA] Failed to fetch groups for ${acc.label}:`, e);
+    }
   }
-  try {
-    const groupsMap = await state.socket.groupFetchAllParticipating();
-    const result = Object.values(groupsMap).map((g: any) => ({
-      id: g.id,
-      name: g.subject || 'Grup WhatsApp',
-      participantsCount: Array.isArray(g.participants) ? g.participants.length : 0,
-    }));
-    return result;
-  } catch (err) {
-    console.error('Failed to fetch WhatsApp groups:', err);
-    return [];
-  }
+
+  return Array.from(groupsMap.values());
 }
 
-// Fetch all discovered contacts from WhatsApp (tracked chats & group participants)
-export async function getWhatsAppContacts(): Promise<Array<{ id: string; phone: string; name: string; source: string }>> {
-  if (!state.socket || state.status !== 'connected') {
-    return [];
-  }
+// Fetch WhatsApp Contacts (across connected accounts or specific account)
+export async function getWhatsAppContacts(preferredAccountId?: string): Promise<Array<{ id: string; phone: string; name: string; source: string }>> {
+  const connectedAccounts = Array.from(state.accounts.values()).filter(
+    (a) => a.status === 'connected' && a.socket
+  );
+
+  if (connectedAccounts.length === 0) return [];
+
+  const targets = preferredAccountId
+    ? connectedAccounts.filter((a) => a.id === preferredAccountId)
+    : connectedAccounts;
 
   const results: Array<{ id: string; phone: string; name: string; source: string }> = [];
   const seenPhones = new Set<string>();
 
-  // 1. From tracked contacts
-  if (state.contactsMap) {
-    for (const [_, c] of state.contactsMap.entries()) {
+  for (const acc of targets) {
+    // Tracked contacts
+    for (const [_, c] of acc.contactsMap.entries()) {
       if (c.phone && !seenPhones.has(c.phone)) {
         seenPhones.add(c.phone);
         results.push({
           id: c.id,
           phone: c.phone,
           name: c.name || c.phone,
-          source: 'Buku Kontak WhatsApp',
+          source: `${acc.label} (Buku Telepon)`,
         });
       }
     }
-  }
 
-  // 2. From groups participating (participants)
-  try {
-    const groups = await state.socket.groupFetchAllParticipating();
-    for (const g of Object.values(groups) as any[]) {
-      const groupName = g.subject || 'Grup WA';
-      if (Array.isArray(g.participants)) {
-        for (const p of g.participants) {
-          const rawId = p.id || '';
-          if (rawId && !rawId.endsWith('@g.us')) {
-            const phone = rawId.split(':')[0].split('@')[0];
-            if (phone && !seenPhones.has(phone)) {
-              seenPhones.add(phone);
-              const known = state.contactsMap?.get(rawId);
-              results.push({
-                id: rawId,
-                phone,
-                name: known?.name || `Peserta ${groupName} (${phone.slice(-4)})`,
-                source: groupName,
-              });
+    // Group participants
+    try {
+      const groups = await acc.socket.groupFetchAllParticipating();
+      for (const g of Object.values(groups) as any[]) {
+        const groupName = g.subject || 'Grup WA';
+        if (Array.isArray(g.participants)) {
+          for (const p of g.participants) {
+            const rawId = p.id || '';
+            if (rawId && !rawId.endsWith('@g.us')) {
+              const phone = rawId.split(':')[0].split('@')[0];
+              if (phone && !seenPhones.has(phone)) {
+                seenPhones.add(phone);
+                const known = acc.contactsMap?.get(rawId);
+                results.push({
+                  id: rawId,
+                  phone,
+                  name: known?.name || `Peserta ${groupName} (${phone.slice(-4)})`,
+                  source: groupName,
+                });
+              }
             }
           }
         }
       }
+    } catch (err) {
+      // ignore
     }
-  } catch (err) {
-    console.warn('Could not fetch group participants for contacts:', err);
   }
 
   return results;
 }
 
-// Fetch participants of a specific group
-export async function getWhatsAppGroupParticipants(groupId: string): Promise<Array<{ id: string; phone: string; name: string; groupName: string }>> {
-  if (!state.socket || state.status !== 'connected') {
-    return [];
-  }
-  try {
-    const groupMeta = await state.socket.groupMetadata(groupId);
-    const groupName = groupMeta.subject || 'Grup WA';
-    const participants: Array<{ id: string; phone: string; name: string; groupName: string }> = [];
+// Fetch Group Participants
+export async function getWhatsAppGroupParticipants(
+  groupId: string,
+  preferredAccountId?: string
+): Promise<Array<{ id: string; phone: string; name: string; groupName: string }>> {
+  const connectedAccounts = Array.from(state.accounts.values()).filter(
+    (a) => a.status === 'connected' && a.socket
+  );
 
-    if (Array.isArray(groupMeta.participants)) {
-      for (const p of groupMeta.participants) {
-        const rawId = p.id || '';
-        const phone = rawId.split(':')[0].split('@')[0];
-        if (phone) {
-          const known = state.contactsMap?.get(rawId);
-          participants.push({
-            id: rawId,
-            phone,
-            name: known?.name || `Anggota (${phone.slice(-4)})`,
-            groupName,
-          });
+  if (connectedAccounts.length === 0) return [];
+
+  for (const acc of connectedAccounts) {
+    try {
+      const groupMeta = await acc.socket.groupMetadata(groupId);
+      const groupName = groupMeta.subject || 'Grup WA';
+      const participants: Array<{ id: string; phone: string; name: string; groupName: string }> = [];
+
+      if (Array.isArray(groupMeta.participants)) {
+        for (const p of groupMeta.participants) {
+          const rawId = p.id || '';
+          const phone = rawId.split(':')[0].split('@')[0];
+          if (phone) {
+            const known = acc.contactsMap?.get(rawId);
+            participants.push({
+              id: rawId,
+              phone,
+              name: known?.name || `Anggota (${phone.slice(-4)})`,
+              groupName,
+            });
+          }
         }
       }
+      return participants;
+    } catch (err) {
+      // Try next account
     }
-    return participants;
-  } catch (err) {
-    console.error('Failed to get group metadata for participants:', err);
-    return [];
   }
-}
 
+  return [];
+}
