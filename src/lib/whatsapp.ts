@@ -61,36 +61,8 @@ function saveAccountLabels(labels: Record<string, string>): void {
   }
 }
 
-// Ensure migration from old single-account auth directory to acc_1
-function migrateOldAuthIfNeeded() {
-  try {
-    const oldCreds = path.join(BASE_AUTH_DIR, 'creds.json');
-    const acc1Dir = path.join(BASE_AUTH_DIR, 'acc_1');
-    const acc1Creds = path.join(acc1Dir, 'creds.json');
-
-    if (fs.existsSync(oldCreds) && !fs.existsSync(acc1Creds)) {
-      if (!fs.existsSync(acc1Dir)) fs.mkdirSync(acc1Dir, { recursive: true });
-      const entries = fs.readdirSync(BASE_AUTH_DIR);
-      for (const entry of entries) {
-        const fullPath = path.join(BASE_AUTH_DIR, entry);
-        if (entry.startsWith('acc_')) continue;
-        if (fs.statSync(fullPath).isFile()) {
-          const dest = path.join(acc1Dir, entry);
-          if (!fs.existsSync(dest)) {
-            fs.copyFileSync(fullPath, dest);
-          }
-        }
-      }
-      console.log('[MULTI-WA] Migrated existing single-account session to acc_1');
-    }
-  } catch (err) {
-    console.error('[MULTI-WA] Migration error:', err);
-  }
-}
-
 // Initialize Global State
 if (!globalForWA.multiWaState) {
-  migrateOldAuthIfNeeded();
   const labels = loadAccountLabels();
   const accountsMap = new Map<string, WhatsAppAccountState>();
 
