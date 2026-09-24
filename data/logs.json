@@ -1,5 +1,16 @@
 [
   {
+    "id": "log-1790204817124-i1xz0",
+    "scheduleId": "instant-1790204816451",
+    "scheduleTitle": "Broadcast Langsung",
+    "recipientPhone": "082230368338",
+    "recipientName": "Penerima",
+    "messageText": "woyy",
+    "hasAttachment": false,
+    "status": "success",
+    "sentAt": "2026-09-23T23:06:57.124Z"
+  },
+  {
     "id": "log-1790190424180-cb5f5",
     "scheduleId": "sch-1790190121824",
     "scheduleTitle": "Pengumuman Jadwal Kegiatan / Acara",
