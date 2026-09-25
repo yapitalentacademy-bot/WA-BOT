@@ -57,7 +57,9 @@ export default function ScheduleModal({
   const [previewDate, setPreviewDate] = useState(todayWibStr);
 
   // Recipients
-  const [recipientType, setRecipientType] = useState<'all' | 'group' | 'custom' | 'wa_group' | 'contacts'>('contacts');
+  const [recipientType, setRecipientType] = useState<'all' | 'group' | 'custom' | 'wa_group' | 'contacts'>('wa_group');
+  const [sendToAllWaGroups, setSendToAllWaGroups] = useState<boolean>(true);
+  const [sendToAllContacts, setSendToAllContacts] = useState<boolean>(true);
   const [selectedGroup, setSelectedGroup] = useState('');
   const [customPhones, setCustomPhones] = useState('');
   const [availableContacts, setAvailableContacts] = useState<{ id: string; name: string; phone: string; source: string }[]>([]);
@@ -171,7 +173,9 @@ export default function ScheduleModal({
         setScheduledTime(`${hh}:${min}`);
         setRecurringTime('08:00');
         setRecurringDay(1);
-        setRecipientType('contacts');
+        setRecipientType('wa_group');
+        setSendToAllWaGroups(true);
+        setSendToAllContacts(true);
         setSelectedContacts([]);
         setSelectedWaGroupIds([]);
         setCustomPhones('');
@@ -535,22 +539,27 @@ export default function ScheduleModal({
 
       let targetWaGroupsPayload: { id: string; name: string }[] | undefined = undefined;
       if (recipientType === 'wa_group') {
-        const groupsFromChecklist = selectedWaGroupIds.map((id) => {
-          const match = waGroups.find((g) => g.id === id);
-          return { id, name: match ? match.name : 'Grup WA' };
-        });
-        const manualGroups = manualWaGroupId
-          .split('\n')
-          .map((id) => id.trim())
-          .filter(Boolean)
-          .map((id) => ({
-            id: id.endsWith('@g.us') ? id : `${id}@g.us`,
-            name: 'Grup Manual',
-          }));
+        if (sendToAllWaGroups) {
+          targetWaGroupsPayload = waGroups.map((g) => ({ id: g.id, name: g.name }));
+        } else {
+          const groupsFromChecklist = selectedWaGroupIds.map((id) => {
+            const match = waGroups.find((g) => g.id === id);
+            return { id, name: match ? match.name : 'Grup WA' };
+          });
+          const manualGroups = manualWaGroupId
+            .split('\n')
+            .map((id) => id.trim())
+            .filter(Boolean)
+            .map((id) => ({
+              id: id.endsWith('@g.us') ? id : `${id}@g.us`,
+              name: 'Grup Manual',
+            }));
 
-        targetWaGroupsPayload = [...groupsFromChecklist, ...manualGroups];
+          targetWaGroupsPayload = [...groupsFromChecklist, ...manualGroups];
+        }
+
         if (targetWaGroupsPayload.length === 0) {
-          setError('Pilih minimal 1 grup WhatsApp atau masukkan ID grup');
+          setError('Pilih minimal 1 grup WhatsApp atau aktifkan opsi Kirim ke Semua Grup');
           setLoading(false);
           return;
         }
@@ -558,12 +567,11 @@ export default function ScheduleModal({
 
       let selectedContactsPayload: { name: string; phone: string }[] | undefined = undefined;
       if (recipientType === 'contacts') {
-        if (selectedContacts.length === 0) {
-          setError('Pilih minimal 1 nama kontak penerima pesan');
-          setLoading(false);
-          return;
+        if (sendToAllContacts || selectedContacts.length === 0) {
+          selectedContactsPayload = availableContacts.map((c) => ({ name: c.name, phone: c.phone }));
+        } else {
+          selectedContactsPayload = selectedContacts;
         }
-        selectedContactsPayload = selectedContacts;
       }
 
       const payload = {
@@ -1105,255 +1113,311 @@ export default function ScheduleModal({
               {/* FITUR 2: GRUP WHATSAPP SELECTION WITH ADVANCED SEARCH */}
               {recipientType === 'wa_group' && (
                 <div className="form-group" style={{ background: 'var(--bg-input)', padding: 12, borderRadius: 'var(--radius-md)', border: '1px solid var(--border-subtle)' }}>
-                  {/* Header Counter & Refresh */}
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8, flexWrap: 'wrap', gap: 6 }}>
-                    <div style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--wa-emerald)' }}>
-                      Pilih Grup WhatsApp Tujuan ({selectedWaGroupIds.length} dipilih)
-                    </div>
-                    <button
-                      type="button"
-                      className="btn btn-secondary btn-sm"
-                      style={{ padding: '2px 8px', fontSize: '0.72rem' }}
-                      onClick={handleRefreshWaGroups}
-                      disabled={loadingWaGroups}
-                    >
-                      {loadingWaGroups ? 'Memuat...' : '🔄 Sinkronkan Grup'}
-                    </button>
-                  </div>
-
-                  {/* Selected Chips Bar */}
-                  {selectedWaGroupIds.length > 0 && (
-                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginBottom: 8, maxHeight: 65, overflowY: 'auto', padding: 4, background: 'rgba(0,0,0,0.2)', borderRadius: 'var(--radius-sm)' }}>
-                      {selectedWaGroupIds.map((gid) => {
-                        const match = waGroups.find((g) => g.id === gid);
-                        return (
-                          <span
-                            key={gid}
-                            style={{
-                              background: 'rgba(0, 168, 132, 0.25)',
-                              border: '1px solid var(--wa-emerald)',
-                              color: '#fff',
-                              fontSize: '0.72rem',
-                              padding: '2px 8px',
-                              borderRadius: 12,
-                              display: 'flex',
-                              alignItems: 'center',
-                              gap: 4,
-                            }}
-                          >
-                            <span>{match ? match.name : gid.split('@')[0]}</span>
-                            <span
-                              style={{ cursor: 'pointer', fontWeight: 'bold', color: '#f87171' }}
-                              onClick={() => handleRemoveWaGroupChip(gid)}
-                            >
-                              &times;
-                            </span>
-                          </span>
-                        );
-                      })}
-                    </div>
-                  )}
-
-                  {/* Search Bar & Action Buttons (FITUR 2) */}
-                  <div style={{ display: 'flex', gap: 6, marginBottom: 8, flexWrap: 'wrap' }}>
-                    <div style={{ flex: 1, minWidth: 200, position: 'relative' }}>
-                      <input
-                        type="text"
-                        className="form-input"
-                        style={{ fontSize: '0.8rem', padding: '6px 26px 6px 10px' }}
-                        placeholder="🔍 Cari nama grup atau ID..."
-                        value={waGroupSearchQuery}
-                        onChange={(e) => setWaGroupSearchQuery(e.target.value)}
-                      />
-                      {waGroupSearchQuery && (
-                        <button
-                          type="button"
-                          onClick={() => setWaGroupSearchQuery('')}
-                          style={{
-                            position: 'absolute',
-                            right: 8,
-                            top: '50%',
-                            transform: 'translateY(-50%)',
-                            background: 'none',
-                            border: 'none',
-                            color: 'var(--text-muted)',
-                            cursor: 'pointer',
-                          }}
-                        >
-                          ✕
-                        </button>
-                      )}
-                    </div>
-
-                    <button
-                      type="button"
-                      className="btn btn-secondary btn-sm"
-                      style={{ fontSize: '0.72rem', padding: '4px 8px' }}
-                      onClick={handleSelectAllFilteredWaGroups}
-                    >
-                      ✓ Pilih Semua Hasil ({filteredWaGroups.length})
-                    </button>
-
-                    {selectedWaGroupIds.length > 0 && (
-                      <button
-                        type="button"
-                        className="btn btn-secondary btn-sm"
-                        style={{ fontSize: '0.72rem', padding: '4px 8px', color: 'var(--error)' }}
-                        onClick={handleClearAllWaGroups}
-                      >
-                        ✕ Hapus Pilihan
-                      </button>
-                    )}
-                  </div>
-
-                  {/* Quick Filter Toggle & Counter */}
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8, fontSize: '0.75rem', color: 'var(--text-dim)' }}>
-                    <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}>
+                  {/* OPSI TERPISAH: KIRIM KE SEMUA GRUP OTOMATIS */}
+                  <div style={{
+                    background: sendToAllWaGroups ? 'rgba(0, 168, 132, 0.2)' : 'rgba(255,255,255,0.04)',
+                    border: sendToAllWaGroups ? '1.5px solid var(--wa-emerald)' : '1px solid var(--border-subtle)',
+                    borderRadius: 'var(--radius-md)',
+                    padding: '10px 12px',
+                    marginBottom: 10,
+                  }}>
+                    <label style={{ display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer', fontWeight: 600, fontSize: '0.85rem' }}>
                       <input
                         type="checkbox"
-                        checked={showSelectedOnly}
-                        onChange={(e) => setShowSelectedOnly(e.target.checked)}
+                        checked={sendToAllWaGroups}
+                        onChange={(e) => setSendToAllWaGroups(e.target.checked)}
+                        style={{ width: 18, height: 18, accentColor: 'var(--wa-emerald)' }}
                       />
-                      <span>Tampilkan yang dipilih saja</span>
+                      <div>
+                        <div>🚀 Kirim Otomatis ke SELURUH Grup WhatsApp ({waGroups.length > 0 ? `${waGroups.length} Grup` : '227+ Grup'})</div>
+                        <div style={{ fontSize: '0.73rem', color: 'var(--text-dim)', fontWeight: 400 }}>
+                          {sendToAllWaGroups ? '✅ Otomatis aktif: Pesan langsung terkirim ke semua grup tanpa perlu menautkan/memilih satu per satu' : '⚠️ Non-aktif: Pilih grup tertentu secara manual di bawah'}
+                        </div>
+                      </div>
                     </label>
-                    <span>Menampilkan {filteredWaGroups.length} dari {waGroups.length} grup</span>
                   </div>
 
-                  {/* Group List */}
-                  {waGroups.length === 0 ? (
-                    <div style={{ padding: '10px 0', fontSize: '0.82rem', color: 'var(--text-muted)' }}>
-                      Belum ada grup terdeteksi. Pastikan akun WhatsApp Anda sudah terhubung di dashboard, lalu klik <strong>Sinkronkan Grup</strong> di atas.
-                    </div>
-                  ) : filteredWaGroups.length === 0 ? (
-                    <div style={{ padding: '12px 0', textAlign: 'center', fontSize: '0.82rem', color: 'var(--text-muted)' }}>
-                      Tidak ada grup yang cocok dengan &quot;{debouncedWaGroupSearch}&quot;
-                    </div>
-                  ) : (
-                    <div style={{ maxHeight: 180, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 6 }}>
-                      {filteredWaGroups.map((g) => {
-                        const isChecked = selectedWaGroupIds.includes(g.id);
-                        return (
-                          <label
-                            key={g.id}
-                            style={{
-                              display: 'flex',
-                              alignItems: 'center',
-                              gap: 10,
-                              padding: '6px 10px',
-                              borderRadius: 'var(--radius-sm)',
-                              background: isChecked ? 'rgba(0, 168, 132, 0.15)' : 'rgba(255, 255, 255, 0.03)',
-                              cursor: 'pointer',
-                              fontSize: '0.85rem',
-                              border: isChecked ? '1px solid var(--wa-emerald)' : '1px solid transparent',
-                            }}
-                          >
-                            <input
-                              type="checkbox"
-                              checked={isChecked}
-                              onChange={(e) => {
-                                if (e.target.checked) {
-                                  setSelectedWaGroupIds((prev) => [...prev, g.id]);
-                                } else {
-                                  setSelectedWaGroupIds((prev) => prev.filter((id) => id !== g.id));
-                                }
+                  {!sendToAllWaGroups && (
+                    <>
+                      {/* Header Counter & Refresh */}
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8, flexWrap: 'wrap', gap: 6 }}>
+                        <div style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--wa-emerald)' }}>
+                          Pilih Grup WhatsApp Tujuan ({selectedWaGroupIds.length} dipilih)
+                        </div>
+                        <button
+                          type="button"
+                          className="btn btn-secondary btn-sm"
+                          style={{ padding: '2px 8px', fontSize: '0.72rem' }}
+                          onClick={handleRefreshWaGroups}
+                          disabled={loadingWaGroups}
+                        >
+                          {loadingWaGroups ? 'Memuat...' : '🔄 Sinkronkan Grup'}
+                        </button>
+                      </div>
+
+                      {/* Selected Chips Bar */}
+                      {selectedWaGroupIds.length > 0 && (
+                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginBottom: 8, maxHeight: 65, overflowY: 'auto', padding: 4, background: 'rgba(0,0,0,0.2)', borderRadius: 'var(--radius-sm)' }}>
+                          {selectedWaGroupIds.map((gid) => {
+                            const match = waGroups.find((g) => g.id === gid);
+                            return (
+                              <span
+                                key={gid}
+                                style={{
+                                  background: 'rgba(0, 168, 132, 0.25)',
+                                  border: '1px solid var(--wa-emerald)',
+                                  color: '#fff',
+                                  fontSize: '0.72rem',
+                                  padding: '2px 8px',
+                                  borderRadius: 12,
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  gap: 4,
+                                }}
+                              >
+                                <span>{match ? match.name : gid.split('@')[0]}</span>
+                                <span
+                                  style={{ cursor: 'pointer', fontWeight: 'bold', color: '#f87171' }}
+                                  onClick={() => handleRemoveWaGroupChip(gid)}
+                                >
+                                  &times;
+                                </span>
+                              </span>
+                            );
+                          })}
+                        </div>
+                      )}
+
+                      {/* Search Bar & Action Buttons (FITUR 2) */}
+                      <div style={{ display: 'flex', gap: 6, marginBottom: 8, flexWrap: 'wrap' }}>
+                        <div style={{ flex: 1, minWidth: 200, position: 'relative' }}>
+                          <input
+                            type="text"
+                            className="form-input"
+                            style={{ fontSize: '0.8rem', padding: '6px 26px 6px 10px' }}
+                            placeholder="🔍 Cari nama grup atau ID..."
+                            value={waGroupSearchQuery}
+                            onChange={(e) => setWaGroupSearchQuery(e.target.value)}
+                          />
+                          {waGroupSearchQuery && (
+                            <button
+                              type="button"
+                              onClick={() => setWaGroupSearchQuery('')}
+                              style={{
+                                position: 'absolute',
+                                right: 8,
+                                top: '50%',
+                                transform: 'translateY(-50%)',
+                                background: 'none',
+                                border: 'none',
+                                color: 'var(--text-muted)',
+                                cursor: 'pointer',
                               }}
-                            />
-                            <div style={{ flex: 1, minWidth: 0 }}>
-                              <div style={{ fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                                {renderHighlightedText(g.name, debouncedWaGroupSearch)}
-                              </div>
-                              <div style={{ fontSize: '0.72rem', color: 'var(--text-dim)' }}>
-                                {g.participantsCount} anggota &bull; ID: {renderHighlightedText(g.id.split('@')[0], debouncedWaGroupSearch)}
-                              </div>
-                            </div>
-                          </label>
-                        );
-                      })}
-                    </div>
-                  )}
+                            >
+                              ✕
+                            </button>
+                          )}
+                        </div>
 
-                  <div style={{ marginTop: 10, paddingTop: 8, borderTop: '1px solid var(--border-subtle)' }}>
-                    <label className="form-label" style={{ fontSize: '0.78rem' }}>
-                      Atau Masukkan Group ID Manual:
-                    </label>
-                    <input
-                      type="text"
-                      className="form-input"
-                      style={{ fontSize: '0.82rem', padding: '6px 10px' }}
-                      placeholder="Contoh: 120363025283921829@g.us"
-                      value={manualWaGroupId}
-                      onChange={(e) => setManualWaGroupId(e.target.value)}
-                    />
-                  </div>
+                        <button
+                          type="button"
+                          className="btn btn-secondary btn-sm"
+                          style={{ fontSize: '0.72rem', padding: '4px 8px' }}
+                          onClick={handleSelectAllFilteredWaGroups}
+                        >
+                          ✓ Pilih Semua Hasil ({filteredWaGroups.length})
+                        </button>
+
+                        {selectedWaGroupIds.length > 0 && (
+                          <button
+                            type="button"
+                            className="btn btn-secondary btn-sm"
+                            style={{ fontSize: '0.72rem', padding: '4px 8px', color: 'var(--error)' }}
+                            onClick={handleClearAllWaGroups}
+                          >
+                            ✕ Hapus Pilihan
+                          </button>
+                        )}
+                      </div>
+
+                      {/* Quick Filter Toggle & Counter */}
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8, fontSize: '0.75rem', color: 'var(--text-dim)' }}>
+                        <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}>
+                          <input
+                            type="checkbox"
+                            checked={showSelectedOnly}
+                            onChange={(e) => setShowSelectedOnly(e.target.checked)}
+                          />
+                          <span>Tampilkan yang dipilih saja</span>
+                        </label>
+                        <span>Menampilkan {filteredWaGroups.length} dari {waGroups.length} grup</span>
+                      </div>
+
+                      {/* Group List */}
+                      {waGroups.length === 0 ? (
+                        <div style={{ padding: '10px 0', fontSize: '0.82rem', color: 'var(--text-muted)' }}>
+                          Belum ada grup terdeteksi. Pastikan akun WhatsApp Anda sudah terhubung di dashboard, lalu klik <strong>Sinkronkan Grup</strong> di atas.
+                        </div>
+                      ) : filteredWaGroups.length === 0 ? (
+                        <div style={{ padding: '12px 0', textAlign: 'center', fontSize: '0.82rem', color: 'var(--text-muted)' }}>
+                          Tidak ada grup yang cocok dengan &quot;{debouncedWaGroupSearch}&quot;
+                        </div>
+                      ) : (
+                        <div style={{ maxHeight: 180, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 6 }}>
+                          {filteredWaGroups.map((g) => {
+                            const isChecked = selectedWaGroupIds.includes(g.id);
+                            return (
+                              <label
+                                key={g.id}
+                                style={{
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  gap: 10,
+                                  padding: '6px 10px',
+                                  borderRadius: 'var(--radius-sm)',
+                                  background: isChecked ? 'rgba(0, 168, 132, 0.15)' : 'rgba(255, 255, 255, 0.03)',
+                                  cursor: 'pointer',
+                                  fontSize: '0.85rem',
+                                  border: isChecked ? '1px solid var(--wa-emerald)' : '1px solid transparent',
+                                }}
+                              >
+                                <input
+                                  type="checkbox"
+                                  checked={isChecked}
+                                  onChange={(e) => {
+                                    if (e.target.checked) {
+                                      setSelectedWaGroupIds((prev) => [...prev, g.id]);
+                                    } else {
+                                      setSelectedWaGroupIds((prev) => prev.filter((id) => id !== g.id));
+                                    }
+                                  }}
+                                />
+                                <div style={{ flex: 1, minWidth: 0 }}>
+                                  <div style={{ fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                    {renderHighlightedText(g.name, debouncedWaGroupSearch)}
+                                  </div>
+                                  <div style={{ fontSize: '0.72rem', color: 'var(--text-dim)' }}>
+                                    {g.participantsCount} anggota &bull; ID: {renderHighlightedText(g.id.split('@')[0], debouncedWaGroupSearch)}
+                                  </div>
+                                </div>
+                              </label>
+                            );
+                          })}
+                        </div>
+                      )}
+
+                      <div style={{ marginTop: 10, paddingTop: 8, borderTop: '1px solid var(--border-subtle)' }}>
+                        <label className="form-label" style={{ fontSize: '0.78rem' }}>
+                          Atau Masukkan Group ID Manual:
+                        </label>
+                        <input
+                          type="text"
+                          className="form-input"
+                          style={{ fontSize: '0.82rem', padding: '6px 10px' }}
+                          placeholder="Contoh: 120363025283921829@g.us"
+                          value={manualWaGroupId}
+                          onChange={(e) => setManualWaGroupId(e.target.value)}
+                        />
+                      </div>
+                    </>
+                  )}
                 </div>
               )}
 
               {recipientType === 'contacts' && (
                 <div className="form-group" style={{ background: 'var(--bg-input)', padding: 12, borderRadius: 'var(--radius-md)', border: '1px solid var(--border-subtle)' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10, flexWrap: 'wrap', gap: 8 }}>
-                    <span style={{ fontWeight: 600, fontSize: '0.88rem', color: 'var(--wa-emerald)' }}>
-                      Pilih Nama Kontak ({selectedContacts.length} dipilih)
-                    </span>
-                    <div style={{ display: 'flex', gap: 6 }}>
-                      <button
-                        type="button"
-                        className="btn btn-secondary btn-sm"
-                        style={{ padding: '3px 8px', fontSize: '0.74rem' }}
-                        onClick={handleSelectAllFilteredContacts}
-                      >
-                        ✓ Pilih Semua ({filteredContacts.length})
-                      </button>
-                      {selectedContacts.length > 0 && (
-                        <button
-                          type="button"
-                          className="btn btn-secondary btn-sm"
-                          style={{ padding: '3px 8px', fontSize: '0.74rem', color: 'var(--error)' }}
-                          onClick={handleClearAllContacts}
-                        >
-                          ✕ Batal Semua
-                        </button>
-                      )}
-                    </div>
-                  </div>
-
-                  <div style={{ position: 'relative', marginBottom: 10 }}>
-                    <input
-                      type="text"
-                      className="form-input"
-                      style={{ fontSize: '0.82rem', padding: '7px 28px 7px 10px' }}
-                      placeholder="🔍 Cari nama kontak, nomor telepon, atau kategori..."
-                      value={contactSearchQuery}
-                      onChange={(e) => setContactSearchQuery(e.target.value)}
-                    />
-                  </div>
-
-                  <div style={{ maxHeight: 180, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 6 }}>
-                    {filteredContacts.map((c) => {
-                      const selected = isContactSelected(c.phone);
-                      return (
-                        <div
-                          key={c.id || c.phone}
-                          onClick={() => toggleContactSelection({ name: c.name, phone: c.phone })}
-                          style={{
-                            display: 'flex',
-                            alignItems: 'center',
-                            gap: 10,
-                            padding: '6px 10px',
-                            borderRadius: 'var(--radius-sm)',
-                            background: selected ? 'rgba(0, 168, 132, 0.16)' : 'rgba(255, 255, 255, 0.03)',
-                            cursor: 'pointer',
-                            border: selected ? '1px solid var(--wa-emerald)' : '1px solid transparent',
-                          }}
-                        >
-                          <input type="checkbox" checked={selected} readOnly />
-                          <div style={{ flex: 1, minWidth: 0 }}>
-                            <div style={{ fontWeight: 600, fontSize: '0.85rem' }}>{c.name}</div>
-                            <div style={{ fontSize: '0.73rem', color: 'var(--text-dim)' }}>{c.phone}</div>
-                          </div>
+                  {/* OPSI TERPISAH: KIRIM KE SEMUA KONTAK OTOMATIS */}
+                  <div style={{
+                    background: sendToAllContacts ? 'rgba(0, 168, 132, 0.2)' : 'rgba(255,255,255,0.04)',
+                    border: sendToAllContacts ? '1.5px solid var(--wa-emerald)' : '1px solid var(--border-subtle)',
+                    borderRadius: 'var(--radius-md)',
+                    padding: '10px 12px',
+                    marginBottom: 10,
+                  }}>
+                    <label style={{ display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer', fontWeight: 600, fontSize: '0.85rem' }}>
+                      <input
+                        type="checkbox"
+                        checked={sendToAllContacts}
+                        onChange={(e) => setSendToAllContacts(e.target.checked)}
+                        style={{ width: 18, height: 18, accentColor: 'var(--wa-emerald)' }}
+                      />
+                      <div>
+                        <div>🚀 Kirim Otomatis ke SELURUH Kontak WhatsApp ({availableContacts.length} Kontak)</div>
+                        <div style={{ fontSize: '0.73rem', color: 'var(--text-dim)', fontWeight: 400 }}>
+                          {sendToAllContacts ? '✅ Otomatis aktif: Pesan langsung terkirim ke seluruh kontak tanpa perlu menautkan/memilih satu per satu' : '⚠️ Non-aktif: Pilih kontak tertentu secara manual di bawah'}
                         </div>
-                      );
-                    })}
+                      </div>
+                    </label>
                   </div>
+
+                  {!sendToAllContacts && (
+                    <>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10, flexWrap: 'wrap', gap: 8 }}>
+                        <span style={{ fontWeight: 600, fontSize: '0.88rem', color: 'var(--wa-emerald)' }}>
+                          Pilih Nama Kontak ({selectedContacts.length} dipilih)
+                        </span>
+                        <div style={{ display: 'flex', gap: 6 }}>
+                          <button
+                            type="button"
+                            className="btn btn-secondary btn-sm"
+                            style={{ padding: '3px 8px', fontSize: '0.74rem' }}
+                            onClick={handleSelectAllFilteredContacts}
+                          >
+                            ✓ Pilih Semua ({filteredContacts.length})
+                          </button>
+                          {selectedContacts.length > 0 && (
+                            <button
+                              type="button"
+                              className="btn btn-secondary btn-sm"
+                              style={{ padding: '3px 8px', fontSize: '0.74rem', color: 'var(--error)' }}
+                              onClick={handleClearAllContacts}
+                            >
+                              ✕ Batal Semua
+                            </button>
+                          )}
+                        </div>
+                      </div>
+
+                      <div style={{ position: 'relative', marginBottom: 10 }}>
+                        <input
+                          type="text"
+                          className="form-input"
+                          style={{ fontSize: '0.82rem', padding: '7px 28px 7px 10px' }}
+                          placeholder="🔍 Cari nama kontak, nomor telepon, atau kategori..."
+                          value={contactSearchQuery}
+                          onChange={(e) => setContactSearchQuery(e.target.value)}
+                        />
+                      </div>
+
+                      <div style={{ maxHeight: 180, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 6 }}>
+                        {filteredContacts.map((c) => {
+                          const selected = isContactSelected(c.phone);
+                          return (
+                            <div
+                              key={c.id || c.phone}
+                              onClick={() => toggleContactSelection({ name: c.name, phone: c.phone })}
+                              style={{
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: 10,
+                                padding: '6px 10px',
+                                borderRadius: 'var(--radius-sm)',
+                                background: selected ? 'rgba(0, 168, 132, 0.16)' : 'rgba(255, 255, 255, 0.03)',
+                                cursor: 'pointer',
+                                border: selected ? '1px solid var(--wa-emerald)' : '1px solid transparent',
+                              }}
+                            >
+                              <input type="checkbox" checked={selected} readOnly />
+                              <div style={{ flex: 1, minWidth: 0 }}>
+                                <div style={{ fontWeight: 600, fontSize: '0.85rem' }}>{c.name}</div>
+                                <div style={{ fontSize: '0.73rem', color: 'var(--text-dim)' }}>{c.phone}</div>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </>
+                  )}
                 </div>
               )}
 
