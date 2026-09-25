@@ -297,6 +297,23 @@ export default function ContactManager() {
     }
   };
 
+  const handleClearAllContacts = async () => {
+    if (!confirm('Apakah Anda yakin ingin MENGHAPUS SEMUA KONTAK di buku telepon ini untuk mengimpor ulang secara bersih?')) return;
+    setLoading(true);
+    try {
+      const res = await fetch('/api/contacts?clearAll=true', { method: 'DELETE' });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
+      setSuccess('Semua kontak lama berhasil dibersihkan! Silakan klik Impor Otomatis dari WA.');
+      fetchContacts();
+      setTimeout(() => setSuccess(null), 4000);
+    } catch (err: any) {
+      alert(err?.message || 'Gagal menghapus semua kontak');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   return (
     <div>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20, flexWrap: 'wrap', gap: 12 }}>
@@ -325,6 +342,16 @@ export default function ContactManager() {
           <button className="btn btn-secondary" onClick={() => setShowBulkModal(true)}>
             📋 Impor CSV/Teks
           </button>
+          {contacts.length > 0 && (
+            <button
+              className="btn btn-danger"
+              style={{ fontSize: '0.82rem', padding: '6px 12px' }}
+              onClick={handleClearAllContacts}
+              title="Kosongkan Kontak Lama Untuk Impor Ulang Bersih"
+            >
+              🧹 Kosongkan Semua ({contacts.length})
+            </button>
+          )}
           <button
             className="btn btn-primary"
             onClick={() => {
