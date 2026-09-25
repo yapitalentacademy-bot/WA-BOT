@@ -97,6 +97,8 @@ export interface BroadcastSchedule {
   isExpired?: boolean; // Set to true if all dates in file have passed
   recipients: {
     type: 'all' | 'group' | 'custom' | 'wa_group' | 'contacts';
+    sendToAllWaGroups?: boolean;
+    sendToAllContacts?: boolean;
     targetGroup?: string;
     customPhones?: string[]; // array of phone numbers
     targetWaGroups?: { id: string; name: string }[]; // array of WhatsApp Groups
@@ -104,7 +106,8 @@ export interface BroadcastSchedule {
     senderAccountId?: string; // 'rotation' | 'acc_1' | 'acc_2' | etc.
   };
   scheduleType: ScheduleRepeatType;
-  scheduledTime: string; // ISO string e.g. 2026-09-24T08:00
+  scheduledDate?: string; // e.g. "2026-09-26"
+  scheduledTime: string; // e.g. "08:00" or ISO string
   recurringTime?: string; // e.g. "08:00" for daily/weekly
   recurringDay?: number; // 0-6 for weekly (0 = Sunday, 1 = Monday, etc.)
   status: 'active' | 'completed' | 'paused';

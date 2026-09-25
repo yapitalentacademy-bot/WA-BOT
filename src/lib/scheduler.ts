@@ -1,5 +1,5 @@
 import { Storage } from './storage';
-import { sendWhatsAppText, sendWhatsAppFile, getWhatsAppStatus } from './whatsapp';
+import { sendWhatsAppText, sendWhatsAppFile, getWhatsAppStatus, sendSelfChatNotification } from './whatsapp';
 import { BroadcastSchedule, Contact, BroadcastLog, ScheduleRow } from '@/types';
 
 // Singleton worker tracker in global scope
@@ -348,6 +348,19 @@ export async function executeSchedule(schedule: BroadcastSchedule): Promise<void
     Storage.updateSchedule(schedule.id, {
       lastRun: nowIso,
     });
+  }
+
+  // Send self-chat report
+  try {
+    const reportText = `⚡ *Share Otomatis — Laporan Broadcast*
+
+📌 *Jadwal*: ${schedule.title}
+✅ *Berhasil Terkirim*: ${targetContacts.length} penerima
+⏰ *Waktu*: ${new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })} WIB
+${isExpired ? '⚠️ *Info*: Seluruh baris tanggal file jadwal ini telah selesai.' : ''}`;
+    await sendSelfChatNotification(reportText, schedule.recipients.senderAccountId);
+  } catch (err) {
+    // Ignore notification error if offline
   }
 }
 

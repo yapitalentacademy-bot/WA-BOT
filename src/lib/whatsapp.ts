@@ -2,9 +2,23 @@ import path from 'path';
 import fs from 'fs';
 import QRCode from 'qrcode';
 import pino from 'pino';
-import { WhatsAppStatus, WhatsAppUserInfo, WhatsAppAccountInfo } from '@/types';
+import { WhatsAppStatus, WhatsAppUserInfo, WhatsAppAccountInfo, AttachedFile } from '@/types';
+import { Storage } from './storage';
+import { BotCommandHandler } from './botCommands';
 
 export const MAX_WA_ACCOUNTS = 5;
+
+// Anti-Looping: Track IDs of messages sent by bot to avoid self-response loops
+const sentBotMsgIds = new Set<string>();
+
+export function trackSentBotMsgId(msgId?: string | null) {
+  if (!msgId) return;
+  sentBotMsgIds.add(msgId);
+  if (sentBotMsgIds.size > 1000) {
+    const first = sentBotMsgIds.values().next().value;
+    if (first) sentBotMsgIds.delete(first);
+  }
+}
 
 export interface WhatsAppAccountState {
   id: string; // 'acc_1', 'acc_2', 'acc_3', 'acc_4', 'acc_5'
@@ -418,14 +432,101 @@ export async function initWhatsApp(accountId = 'acc_1', force = false): Promise<
       }
     });
 
-    sock.ev.on('messages.upsert', ({ messages }: any) => {
+    sock.ev.on('messages.upsert', async ({ messages }: any) => {
       if (!Array.isArray(messages)) return;
       for (const m of messages) {
-        // PENTING: Abaikan pesan keluar (key.fromMe === true) agar pushName sendiri tidak menimpa nama penerima!
-        if (m.key?.fromMe) continue;
-        const jid = m.key?.participant || m.key?.remoteJid;
-        if (jid && m.pushName) {
-          storeContact({ id: jid, pushName: m.pushName }, 'push');
+        const msgId = m.key?.id;
+
+        // 1. Anti-Looping: Abaikan pesan yang dikirim oleh bot itu sendiri
+        if (msgId && sentBotMsgIds.has(msgId)) continue;
+
+        // Update kontak map dari pushName untuk pesan masuk
+        if (!m.key?.fromMe) {
+          const jid = m.key?.participant || m.key?.remoteJid;
+          if (jid && m.pushName) {
+            storeContact({ id: jid, pushName: m.pushName }, 'push');
+          }
+        }
+
+        // 2. KEAMANAN SANGAT KETAT:
+        // Perintah HANYA diterima dari:
+        // a) Self-Chat akun yang ditautkan ( remoteJid == userJid )
+        // b) Nomor Admin di whitelist (env ADMIN_NUMBERS)
+        const remoteJid = m.key?.remoteJid || '';
+        const userJid = sock.user?.id || '';
+        const cleanUserPhone = userJid.split(':')[0].split('@')[0];
+        const senderPhone = remoteJid.split('@')[0].split(':')[0];
+
+        const adminNumbersEnv = process.env.ADMIN_NUMBERS || '';
+        const adminNumbers = adminNumbersEnv.split(',').map((n) => n.trim().replace(/\D/g, '')).filter(Boolean);
+
+        const isSelfChat = remoteJid === userJid || senderPhone === cleanUserPhone || (m.key?.fromMe && !remoteJid.endsWith('@g.us'));
+        const isAdmin = adminNumbers.includes(senderPhone);
+
+        // KETAT: Abaikan jika berasal dari grup WA (@g.us) atau nomor lain yang bukan Admin / Self-chat
+        if (remoteJid.endsWith('@g.us') || (!isSelfChat && !isAdmin)) {
+          continue;
+        }
+
+        // Ambil isi teks perintah
+        const messageText =
+          m.message?.conversation ||
+          m.message?.extendedTextMessage?.text ||
+          m.message?.imageMessage?.caption ||
+          m.message?.documentMessage?.caption ||
+          '';
+
+        let attachedFileFromMsg: AttachedFile | undefined = undefined;
+        const docMsg = m.message?.documentMessage || m.message?.imageMessage;
+
+        if (docMsg) {
+          try {
+            const buffer = await baileys.downloadMediaMessage(m, 'buffer', {});
+            const fileName = docMsg.fileName || `file_${Date.now()}.${docMsg.mimetype?.split('/')[1] || 'bin'}`;
+            const uploadDir = path.join(process.cwd(), 'data', 'uploads');
+            if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir, { recursive: true });
+
+            const localPath = path.join(uploadDir, `${Date.now()}_${fileName}`);
+            fs.writeFileSync(localPath, buffer);
+
+            const fileUrl = `/uploads/${path.basename(localPath)}`;
+            attachedFileFromMsg = {
+              id: `file-${Date.now()}`,
+              name: fileName,
+              originalName: fileName,
+              mimeType: docMsg.mimetype || 'application/octet-stream',
+              size: buffer.length,
+              url: fileUrl,
+              localPath,
+              uploadedAt: new Date().toISOString(),
+            };
+            Storage.addFile(attachedFileFromMsg);
+          } catch (err) {
+            console.error(`[MULTI-WA] [${acc.label}] Gagal mengunduh media dari self-chat:`, err);
+          }
+        }
+
+        if (!messageText.trim() && !attachedFileFromMsg) continue;
+
+        // Jalankan handler perintah bot
+        try {
+          const replyText = await BotCommandHandler.handleCommand(
+            acc.id,
+            remoteJid,
+            messageText,
+            attachedFileFromMsg
+          );
+
+          if (replyText) {
+            const res = await sock.sendMessage(remoteJid, { text: replyText });
+            trackSentBotMsgId(res?.key?.id);
+          }
+        } catch (err: any) {
+          console.error(`[BOT COMMAND ERROR] [${acc.label}]:`, err);
+          const res = await sock.sendMessage(remoteJid, {
+            text: `⚡ *Share Otomatis*\n❌ Gagal memproses perintah: ${err?.message || 'Error internal'}`,
+          });
+          trackSentBotMsgId(res?.key?.id);
         }
       }
     });
@@ -543,8 +644,26 @@ export async function sendWhatsAppText(
   const jid = await resolveWhatsAppJid(toPhone, socket);
   console.log(`[WA SEND] [${account.label} - +${account.userInfo?.phone || ''}] Mengirim teks ke ${jid}`);
   const result = await socket.sendMessage(jid, { text });
+  trackSentBotMsgId(result?.key?.id);
   console.log(`[WA SEND] Pesan berhasil dikirim. Key ID: ${result?.key?.id}`);
   return result;
+}
+
+// Send Self-Chat Notification
+export async function sendSelfChatNotification(
+  text: string,
+  preferredAccountId?: string
+): Promise<any> {
+  try {
+    const { socket, account } = getActiveSocket(preferredAccountId);
+    const userJid = account.userInfo?.id || socket.user?.id;
+    if (!userJid) return;
+    const result = await socket.sendMessage(userJid, { text });
+    trackSentBotMsgId(result?.key?.id);
+    return result;
+  } catch (err) {
+    console.error(`[SELF-CHAT NOTIF] Error sending notification:`, err);
+  }
 }
 
 // Send File / Media / Document
@@ -598,6 +717,7 @@ export async function sendWhatsAppFile(
     });
   }
 
+  trackSentBotMsgId(result?.key?.id);
   console.log(`[WA SEND] File berhasil dikirim. Key ID: ${result?.key?.id}`);
   return result;
 }
