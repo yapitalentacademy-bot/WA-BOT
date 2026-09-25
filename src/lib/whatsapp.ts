@@ -516,6 +516,46 @@ export async function getWhatsAppGroups(preferredAccountId?: string): Promise<{ 
   return Array.from(groupsMap.values());
 }
 
+}
+
+// Helper to resolve participant details (Phone, LID, and Saved Name)
+function resolveParticipantInfo(acc: WhatsAppAccountState, p: any, groupName: string) {
+  const rawId = p.id || '';
+  const pnJid = p.pn || p.phoneNumber || (rawId.endsWith('@s.whatsapp.net') ? rawId : '');
+  const lidJid = p.lid || (rawId.endsWith('@lid') ? rawId : '');
+
+  let phone = '';
+  if (pnJid) {
+    phone = pnJid.split('@')[0].split(':')[0];
+  } else if (rawId && !rawId.endsWith('@lid')) {
+    phone = rawId.split('@')[0].split(':')[0];
+  }
+
+  // Look up in contactsMap
+  const known =
+    (rawId ? acc.contactsMap.get(rawId) : null) ||
+    (lidJid ? acc.contactsMap.get(lidJid) : null) ||
+    (phone ? acc.contactsMap.get(phone) : null) ||
+    (phone ? acc.contactsMap.get(`${phone}@s.whatsapp.net`) : null);
+
+  let name = '';
+  if (known?.name && known.name !== phone && known.name !== rawId) {
+    name = known.name;
+  } else if (p.name || p.notify || p.verifiedName) {
+    name = p.name || p.notify || p.verifiedName;
+  }
+
+  const destinationId = phone ? `${phone}@s.whatsapp.net` : rawId;
+  const displayPhone = phone || rawId.split('@')[0];
+  const finalName = name || `Peserta ${groupName} (+${displayPhone})`;
+
+  return {
+    id: destinationId,
+    phone: displayPhone,
+    name: finalName,
+  };
+}
+
 // Fetch WhatsApp Contacts (across connected accounts or specific account)
 export async function getWhatsAppContacts(preferredAccountId?: string): Promise<Array<{ id: string; phone: string; name: string; source: string }>> {
   const connectedAccounts = Array.from(state.accounts.values()).filter(
@@ -553,22 +593,15 @@ export async function getWhatsAppContacts(preferredAccountId?: string): Promise<
         const groupName = g.subject || 'Grup WA';
         if (Array.isArray(g.participants)) {
           for (const p of g.participants) {
-            const rawId = p.id || '';
-            if (rawId && !rawId.endsWith('@g.us')) {
-              const phone = rawId.split(':')[0].split('@')[0];
-              if (phone && !seenPhones.has(phone)) {
-                seenPhones.add(phone);
-                const known = acc.contactsMap?.get(rawId) || acc.contactsMap?.get(phone) || acc.contactsMap?.get(`${phone}@s.whatsapp.net`);
-                const displayName = (known?.name && known.name !== phone)
-                  ? known.name
-                  : `Peserta ${groupName} (+${phone})`;
-                results.push({
-                  id: rawId,
-                  phone,
-                  name: displayName,
-                  source: groupName,
-                });
-              }
+            const info = resolveParticipantInfo(acc, p, groupName);
+            if (info.phone && !seenPhones.has(info.phone)) {
+              seenPhones.add(info.phone);
+              results.push({
+                id: info.id,
+                phone: info.phone,
+                name: info.name,
+                source: groupName,
+              });
             }
           }
         }
@@ -600,14 +633,12 @@ export async function getWhatsAppGroupParticipants(
 
       if (Array.isArray(groupMeta.participants)) {
         for (const p of groupMeta.participants) {
-          const rawId = p.id || '';
-          const phone = rawId.split(':')[0].split('@')[0];
-          if (phone) {
-            const known = acc.contactsMap?.get(rawId);
+          const info = resolveParticipantInfo(acc, p, groupName);
+          if (info.phone) {
             participants.push({
-              id: rawId,
-              phone,
-              name: known?.name || `Anggota (${phone.slice(-4)})`,
+              id: info.id,
+              phone: info.phone,
+              name: info.name,
               groupName,
             });
           }
