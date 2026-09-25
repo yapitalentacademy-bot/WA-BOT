@@ -250,6 +250,24 @@ export default function ContactManager() {
     }
   };
 
+  // Bulk import file state
+  const [uploadedFileName, setUploadedFileName] = useState<string | null>(null);
+
+  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setUploadedFileName(file.name);
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const content = event.target?.result as string;
+      if (content) {
+        setBulkText(content);
+      }
+    };
+    reader.readAsText(file);
+  };
+
   const handleBulkImport = async () => {
     setSaving(true);
     setError(null);
@@ -257,7 +275,7 @@ export default function ContactManager() {
     try {
       const lines = bulkText.split('\n').filter((l) => l.trim().length > 0);
       const parsed = lines.map((line) => {
-        const parts = line.split(',').map((p) => p.trim());
+        const parts = line.split(/[,;\t]/).map((p) => p.trim().replace(/^["']|["']$/g, ''));
         return {
           phone: parts[0] || '',
           name: parts[1] || 'Kontak',
@@ -275,6 +293,7 @@ export default function ContactManager() {
 
       setSuccess(data.message || 'Kontak berhasil diimpor!');
       setShowBulkModal(false);
+      setUploadedFileName(null);
       fetchContacts();
       setTimeout(() => setSuccess(null), 3000);
     } catch (err: any) {
@@ -899,26 +918,60 @@ export default function ContactManager() {
         </div>
       )}
 
-      {/* MODAL IMPOR MASSAL MANUAL */}
+      {/* MODAL IMPOR MASSAL MANUAL & FILE */}
       {showBulkModal && (
         <div className="modal-overlay" onClick={() => setShowBulkModal(false)}>
           <div className="modal-content" onClick={(e) => e.stopPropagation()}>
             <div className="modal-header">
-              <h3>📋 Impor Kontak Massal (Teks / CSV)</h3>
+              <h3>📋 Impor Kontak Massal (Upload File / CSV / Teks)</h3>
               <button className="close-btn" onClick={() => setShowBulkModal(false)}>&times;</button>
             </div>
 
-            <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)', marginBottom: 12 }}>
-              Salin dan tempel daftar nomor kontak Anda di bawah ini. Satu baris per kontak:
-              <br />
-              Format: <code>Nomor_WA, Nama_Lengkap, Grup</code>
+            {/* Hidden file input */}
+            <input
+              type="file"
+              id="file-upload-bulk"
+              accept=".csv,.txt,.vcf,.tsv"
+              style={{ display: 'none' }}
+              onChange={handleFileUpload}
+            />
+
+            {/* File Upload Drag & Drop Zone */}
+            <div
+              onClick={() => document.getElementById('file-upload-bulk')?.click()}
+              style={{
+                border: '2px dashed var(--wa-emerald)',
+                borderRadius: 'var(--radius-md)',
+                padding: '16px 20px',
+                textAlign: 'center',
+                background: 'rgba(0, 168, 132, 0.08)',
+                cursor: 'pointer',
+                marginBottom: 16,
+                transition: 'all 0.2s ease',
+              }}
+            >
+              <div style={{ fontSize: '1.8rem', marginBottom: 4 }}>📁</div>
+              <div style={{ fontWeight: 600, fontSize: '0.92rem', color: '#fff' }}>
+                {uploadedFileName ? `✅ File Terpilih: ${uploadedFileName}` : 'Klik Di Sini Untuk Pilih / Tautkan File (.CSV, .TXT, .VCF)'}
+              </div>
+              <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)', marginTop: 4 }}>
+                {uploadedFileName ? 'Isi file telah otomatis terbaca di kotak teks di bawah' : 'Atau langsung salin & tempel teks di kotak di bawah ini'}
+              </div>
+            </div>
+
+            <p style={{ fontSize: '0.84rem', color: 'var(--text-muted)', marginBottom: 8, display: 'flex', justifyContent: 'space-between' }}>
+              <span>Format: <code>Nomor_WA, Nama_Lengkap, Grup</code></span>
+              <span style={{ color: 'var(--wa-emerald)', fontWeight: 600 }}>
+                {bulkText.split('\n').filter((l) => l.trim().length > 0).length} Baris Kontak Terdeteksi
+              </span>
             </p>
 
             <div className="form-group">
               <textarea
                 className="form-textarea"
-                rows={8}
+                rows={7}
                 value={bulkText}
+                placeholder="081234567890, Budi Santoso, Siswa&#10;089876543210, Siti Rahma, Guru"
                 onChange={(e) => setBulkText(e.target.value)}
               />
             </div>
@@ -927,7 +980,7 @@ export default function ContactManager() {
               <button className="btn btn-secondary" onClick={() => setShowBulkModal(false)}>
                 Batal
               </button>
-              <button className="btn btn-primary" onClick={handleBulkImport} disabled={saving}>
+              <button className="btn btn-primary" onClick={handleBulkImport} disabled={saving || !bulkText.trim()}>
                 {saving ? 'Mengimpor...' : '🚀 Mulai Impor Kontak'}
               </button>
             </div>
