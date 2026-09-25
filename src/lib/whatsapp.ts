@@ -269,7 +269,7 @@ export async function initWhatsApp(accountId = 'acc_1', force = false): Promise<
 
     sock.ev.on('creds.update', saveCreds);
 
-    sock.ev.on('contacts.set', ({ contacts }: any) => {
+    (sock.ev as any).on('contacts.set', ({ contacts }: any) => {
       if (Array.isArray(contacts)) {
         for (const c of contacts) {
           if (c.id && !c.id.endsWith('@g.us') && !c.id.endsWith('@broadcast')) {
