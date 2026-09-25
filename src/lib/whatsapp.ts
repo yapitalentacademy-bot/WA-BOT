@@ -269,6 +269,30 @@ export async function initWhatsApp(accountId = 'acc_1', force = false): Promise<
 
     sock.ev.on('creds.update', saveCreds);
 
+    sock.ev.on('contacts.set', ({ contacts }: any) => {
+      if (Array.isArray(contacts)) {
+        for (const c of contacts) {
+          if (c.id && !c.id.endsWith('@g.us') && !c.id.endsWith('@broadcast')) {
+            const phone = c.id.split('@')[0];
+            const name = c.name || c.notify || c.verifiedName || phone;
+            acc.contactsMap.set(c.id, { id: c.id, phone, name });
+          }
+        }
+      }
+    });
+
+    sock.ev.on('messaging-history.set', ({ contacts }: any) => {
+      if (Array.isArray(contacts)) {
+        for (const c of contacts) {
+          if (c.id && !c.id.endsWith('@g.us') && !c.id.endsWith('@broadcast')) {
+            const phone = c.id.split('@')[0];
+            const name = c.name || c.notify || c.verifiedName || phone;
+            acc.contactsMap.set(c.id, { id: c.id, phone, name });
+          }
+        }
+      }
+    });
+
     sock.ev.on('contacts.upsert', (contacts: any[]) => {
       for (const c of contacts) {
         if (c.id && !c.id.endsWith('@g.us') && !c.id.endsWith('@broadcast')) {
@@ -287,6 +311,10 @@ export async function initWhatsApp(accountId = 'acc_1', force = false): Promise<
             ...existing,
             name: u.name || u.notify || u.verifiedName || existing.name,
           });
+        } else if (u.id && !u.id.endsWith('@g.us')) {
+          const phone = u.id.split('@')[0];
+          const name = u.name || u.notify || u.verifiedName || phone;
+          acc.contactsMap.set(u.id, { id: u.id, phone, name });
         }
       }
     });
@@ -517,11 +545,12 @@ export async function getWhatsAppContacts(preferredAccountId?: string): Promise<
     for (const [_, c] of acc.contactsMap.entries()) {
       if (c.phone && !seenPhones.has(c.phone)) {
         seenPhones.add(c.phone);
+        const displayName = c.name && c.name !== c.phone ? c.name : `+${c.phone}`;
         results.push({
           id: c.id,
           phone: c.phone,
-          name: c.name || c.phone,
-          source: `${acc.label} (Buku Telepon)`,
+          name: displayName,
+          source: `${acc.label} (Kontak WA)`,
         });
       }
     }
@@ -538,11 +567,14 @@ export async function getWhatsAppContacts(preferredAccountId?: string): Promise<
               const phone = rawId.split(':')[0].split('@')[0];
               if (phone && !seenPhones.has(phone)) {
                 seenPhones.add(phone);
-                const known = acc.contactsMap?.get(rawId);
+                const known = acc.contactsMap?.get(rawId) || acc.contactsMap?.get(`${phone}@s.whatsapp.net`);
+                const displayName = (known?.name && known.name !== phone)
+                  ? known.name
+                  : `Peserta ${groupName} (+${phone})`;
                 results.push({
                   id: rawId,
                   phone,
-                  name: known?.name || `Peserta ${groupName} (${phone.slice(-4)})`,
+                  name: displayName,
                   source: groupName,
                 });
               }
