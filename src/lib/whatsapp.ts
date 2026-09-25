@@ -269,52 +269,43 @@ export async function initWhatsApp(accountId = 'acc_1', force = false): Promise<
 
     sock.ev.on('creds.update', saveCreds);
 
-    (sock.ev as any).on('contacts.set', ({ contacts }: any) => {
-      if (Array.isArray(contacts)) {
-        for (const c of contacts) {
-          if (c.id && !c.id.endsWith('@g.us') && !c.id.endsWith('@broadcast')) {
-            const phone = c.id.split('@')[0];
-            const name = c.name || c.notify || c.verifiedName || phone;
-            acc.contactsMap.set(c.id, { id: c.id, phone, name });
-          }
-        }
+    const storeContact = (c: any) => {
+      if (!c || !c.id) return;
+      if (c.id.endsWith('@g.us') || c.id.endsWith('@broadcast')) return;
+      const phone = c.id.split('@')[0].split(':')[0];
+      const name = c.name || c.notify || c.verifiedName || phone;
+      const item = { id: c.id, phone, name };
+      if (c.name || c.notify || c.verifiedName) {
+        acc.contactsMap.set(c.id, item);
+        acc.contactsMap.set(phone, item);
+        acc.contactsMap.set(`${phone}@s.whatsapp.net`, item);
+        if (c.lid) acc.contactsMap.set(c.lid, item);
+      } else if (!acc.contactsMap.has(c.id)) {
+        acc.contactsMap.set(c.id, item);
+        acc.contactsMap.set(phone, item);
       }
+    };
+
+    (sock.ev as any).on('contacts.set', ({ contacts }: any) => {
+      if (Array.isArray(contacts)) contacts.forEach(storeContact);
     });
 
     sock.ev.on('messaging-history.set', ({ contacts }: any) => {
-      if (Array.isArray(contacts)) {
-        for (const c of contacts) {
-          if (c.id && !c.id.endsWith('@g.us') && !c.id.endsWith('@broadcast')) {
-            const phone = c.id.split('@')[0];
-            const name = c.name || c.notify || c.verifiedName || phone;
-            acc.contactsMap.set(c.id, { id: c.id, phone, name });
-          }
-        }
-      }
+      if (Array.isArray(contacts)) contacts.forEach(storeContact);
     });
 
     sock.ev.on('contacts.upsert', (contacts: any[]) => {
-      for (const c of contacts) {
-        if (c.id && !c.id.endsWith('@g.us') && !c.id.endsWith('@broadcast')) {
-          const phone = c.id.split('@')[0];
-          const name = c.name || c.notify || c.verifiedName || phone;
-          acc.contactsMap.set(c.id, { id: c.id, phone, name });
-        }
-      }
+      if (Array.isArray(contacts)) contacts.forEach(storeContact);
     });
 
     sock.ev.on('contacts.update', (updates: any[]) => {
-      for (const u of updates) {
-        if (u.id && acc.contactsMap.has(u.id)) {
-          const existing = acc.contactsMap.get(u.id)!;
-          acc.contactsMap.set(u.id, {
-            ...existing,
-            name: u.name || u.notify || u.verifiedName || existing.name,
-          });
-        } else if (u.id && !u.id.endsWith('@g.us')) {
-          const phone = u.id.split('@')[0];
-          const name = u.name || u.notify || u.verifiedName || phone;
-          acc.contactsMap.set(u.id, { id: u.id, phone, name });
+      if (Array.isArray(updates)) {
+        for (const u of updates) {
+          if (u.id) {
+            const existing = acc.contactsMap.get(u.id) || acc.contactsMap.get(u.id.split('@')[0]);
+            const newName = u.name || u.notify || u.verifiedName || existing?.name;
+            storeContact({ ...existing, ...u, name: newName });
+          }
         }
       }
     });
@@ -567,7 +558,7 @@ export async function getWhatsAppContacts(preferredAccountId?: string): Promise<
               const phone = rawId.split(':')[0].split('@')[0];
               if (phone && !seenPhones.has(phone)) {
                 seenPhones.add(phone);
-                const known = acc.contactsMap?.get(rawId) || acc.contactsMap?.get(`${phone}@s.whatsapp.net`);
+                const known = acc.contactsMap?.get(rawId) || acc.contactsMap?.get(phone) || acc.contactsMap?.get(`${phone}@s.whatsapp.net`);
                 const displayName = (known?.name && known.name !== phone)
                   ? known.name
                   : `Peserta ${groupName} (+${phone})`;
