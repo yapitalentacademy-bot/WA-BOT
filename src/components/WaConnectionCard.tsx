@@ -142,6 +142,26 @@ export default function WaConnectionCard({ onStatusChange }: WaConnectionCardPro
     }
   };
 
+  const [syncingAccountId, setSyncingAccountId] = useState<string | null>(null);
+  const [syncResult, setSyncResult] = useState<string | null>(null);
+
+  const handleResyncContacts = async (accountId: string) => {
+    setSyncingAccountId(accountId);
+    setSyncResult(null);
+    try {
+      const res = await fetch(`/api/wa/contacts?action=resync&accountId=${accountId}`);
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Gagal menyinkronkan kontak');
+      setSyncResult(data.message || 'Sinkronisasi kontak berhasil!');
+      setTimeout(() => setSyncResult(null), 4000);
+    } catch (err: any) {
+      setSyncResult(err?.message || 'Gagal menyinkronkan kontak');
+      setTimeout(() => setSyncResult(null), 4000);
+    } finally {
+      setSyncingAccountId(null);
+    }
+  };
+
   return (
     <>
       <div className="card" style={{ marginBottom: 24 }}>
@@ -178,6 +198,22 @@ export default function WaConnectionCard({ onStatusChange }: WaConnectionCardPro
             </span>
           </div>
         </div>
+
+        {syncResult && (
+          <div
+            style={{
+              padding: '8px 12px',
+              borderRadius: 'var(--radius-sm)',
+              marginBottom: 12,
+              fontSize: '0.84rem',
+              background: 'rgba(34, 197, 94, 0.15)',
+              color: '#4ade80',
+              border: '1px solid rgba(34, 197, 94, 0.3)',
+            }}
+          >
+            {syncResult}
+          </div>
+        )}
 
         {/* 5 ACCOUNT SELECTOR TABS */}
         <div
@@ -277,6 +313,15 @@ export default function WaConnectionCard({ onStatusChange }: WaConnectionCardPro
             <div style={{ display: 'flex', gap: 8 }}>
               {currentAccount.status === 'connected' && (
                 <>
+                  <button
+                    type="button"
+                    className="btn btn-secondary btn-sm"
+                    disabled={syncingAccountId === currentAccount.id}
+                    onClick={() => handleResyncContacts(currentAccount.id)}
+                    title="Sinkron Ulang Kontak WA Akun Ini"
+                  >
+                    {syncingAccountId === currentAccount.id ? '🔄 Menyinkronkan...' : '🔄 Sinkron Ulang Kontak'}
+                  </button>
                   <button
                     type="button"
                     className="btn btn-secondary btn-sm"

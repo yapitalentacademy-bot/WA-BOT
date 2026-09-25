@@ -15,7 +15,7 @@ export interface WhatsAppAccountState {
   userInfo: WhatsAppUserInfo | null;
   authDir: string;
   isInitializing: boolean;
-  contactsMap: Map<string, { id: string; name: string; phone: string }>;
+  contactsMap: Map<string, { id: string; name: string; phone: string; lid?: string; nameSource?: string }>;
 }
 
 interface MultiAccountWhatsAppState {
@@ -61,6 +61,63 @@ function saveAccountLabels(labels: Record<string, string>): void {
   }
 }
 
+function getContactsFilePath(accId: string): string {
+  const dataDir = process.env.RAILWAY_VOLUME_MOUNT_PATH
+    ? path.join(process.env.RAILWAY_VOLUME_MOUNT_PATH)
+    : path.join(process.cwd(), 'data');
+  if (!fs.existsSync(dataDir)) {
+    fs.mkdirSync(dataDir, { recursive: true });
+  }
+  return path.join(dataDir, `wa_contacts_${accId}.json`);
+}
+
+function loadAccountContacts(accId: string): Map<string, { id: string; name: string; phone: string; lid?: string; nameSource?: string }> {
+  const map = new Map<string, { id: string; name: string; phone: string; lid?: string; nameSource?: string }>();
+  try {
+    const filePath = getContactsFilePath(accId);
+    if (fs.existsSync(filePath)) {
+      const content = fs.readFileSync(filePath, 'utf-8');
+      const list = JSON.parse(content);
+      if (Array.isArray(list)) {
+        for (const item of list) {
+          if (item.id) map.set(item.id, item);
+          if (item.phone) {
+            map.set(item.phone, item);
+            map.set(`${item.phone}@s.whatsapp.net`, item);
+          }
+          if (item.lid) map.set(item.lid, item);
+        }
+      }
+    }
+  } catch (e) {
+    console.error(`Gagal memuat kontak dari disk untuk ${accId}:`, e);
+  }
+  return map;
+}
+
+const saveTimers: Record<string, NodeJS.Timeout> = {};
+function saveAccountContacts(accId: string, contactsMap: Map<string, any>) {
+  if (saveTimers[accId]) clearTimeout(saveTimers[accId]);
+  saveTimers[accId] = setTimeout(() => {
+    try {
+      const filePath = getContactsFilePath(accId);
+      const unique = new Map<string, any>();
+      for (const [_, item] of contactsMap.entries()) {
+        const key = item.phone || item.id;
+        if (key) {
+          const existing = unique.get(key);
+          if (!existing || (item.name && item.name !== item.phone)) {
+            unique.set(key, item);
+          }
+        }
+      }
+      fs.writeFileSync(filePath, JSON.stringify(Array.from(unique.values()), null, 2), 'utf-8');
+    } catch (e) {
+      console.error(`Gagal menyimpan kontak ke disk untuk ${accId}:`, e);
+    }
+  }, 1000);
+}
+
 // Initialize Global State
 if (!globalForWA.multiWaState) {
   const labels = loadAccountLabels();
@@ -78,7 +135,7 @@ if (!globalForWA.multiWaState) {
       userInfo: null,
       authDir,
       isInitializing: false,
-      contactsMap: new Map(),
+      contactsMap: loadAccountContacts(accId),
     });
   }
 
@@ -269,41 +326,85 @@ export async function initWhatsApp(accountId = 'acc_1', force = false): Promise<
 
     sock.ev.on('creds.update', saveCreds);
 
-    const storeContact = (c: any) => {
-      if (!c || !c.id) return;
-      if (c.id.endsWith('@g.us') || c.id.endsWith('@broadcast')) return;
+    const storeContact = (c: any, source?: 'hp' | 'notify' | 'push') => {
+      if (!c || (!c.id && !c.phone && !c.phoneNumber)) return;
+      if (c.id && (c.id.endsWith('@g.us') || c.id.endsWith('@broadcast'))) return;
 
-      const jid = c.id;
-      const phoneRaw = jid.split('@')[0].split(':')[0];
+      const rawId = c.id || '';
+      const lid = c.lid || (rawId.endsWith('@lid') ? rawId : undefined);
       const pn = c.phoneNumber || c.pn;
-      const cleanPhone = pn ? pn.split('@')[0].split(':')[0] : phoneRaw;
 
-      const existing = acc.contactsMap.get(jid) || acc.contactsMap.get(cleanPhone) || acc.contactsMap.get(phoneRaw);
+      let phoneRaw = '';
+      if (pn) {
+        phoneRaw = pn.split('@')[0].split(':')[0];
+      } else if (rawId && !rawId.endsWith('@lid')) {
+        phoneRaw = rawId.split('@')[0].split(':')[0];
+      }
 
-      const namaHp = (c.name && c.name !== cleanPhone && c.name !== jid) ? c.name : existing?.name;
-      const notifyName = (c.notify || c.verifiedName) && (c.notify || c.verifiedName) !== cleanPhone ? (c.notify || c.verifiedName) : undefined;
-      const finalName = namaHp || notifyName || existing?.name || cleanPhone;
+      const cleanPhone = phoneRaw ? cleanPhoneNumber(phoneRaw) : '';
+      const jid = cleanPhone ? `${cleanPhone}@s.whatsapp.net` : rawId;
+      if (!jid && !cleanPhone && !lid) return;
 
-      const item = { id: jid, phone: cleanPhone, name: finalName };
+      // Cari data kontak yang sudah tersimpan sebelumnya (by jid, phone, atau lid)
+      const existing =
+        acc.contactsMap.get(jid) ||
+        (cleanPhone ? acc.contactsMap.get(cleanPhone) : null) ||
+        (lid ? acc.contactsMap.get(lid) : null);
 
-      acc.contactsMap.set(jid, item);
+      const newHpName = (c.name && c.name !== cleanPhone && c.name !== jid && !c.name.startsWith('+')) ? c.name : undefined;
+      const newNotifyName = (c.notify || c.verifiedName) && (c.notify || c.verifiedName) !== cleanPhone ? (c.notify || c.verifiedName) : undefined;
+      const newPushName = (source === 'push' && c.pushName && c.pushName !== cleanPhone) ? c.pushName : undefined;
+
+      let finalName = existing?.name;
+      let nameSource = existing?.nameSource;
+
+      // Hierarki prioritas: name (buku kontak HP) > notify / verifiedName > pushName (pesan masuk) > nomor
+      if (newHpName) {
+        finalName = newHpName;
+        nameSource = 'hp';
+      } else if (newNotifyName && (nameSource !== 'hp' || !finalName || finalName === cleanPhone)) {
+        finalName = newNotifyName;
+        nameSource = 'notify';
+      } else if (newPushName && (!finalName || finalName === cleanPhone || finalName.startsWith('Peserta ') || finalName.startsWith('Anggota '))) {
+        finalName = newPushName;
+        nameSource = 'push';
+      } else if (!finalName) {
+        finalName = cleanPhone ? `+${cleanPhone}` : rawId || 'Kontak';
+        nameSource = 'phone';
+      }
+
+      const finalLid = lid || existing?.lid;
+      const item = {
+        id: jid || `${cleanPhone}@s.whatsapp.net`,
+        phone: cleanPhone,
+        name: finalName || cleanPhone || 'Kontak',
+        lid: finalLid,
+        nameSource,
+      };
+
+      // Simpan ke kontak map akun ini
+      if (jid) acc.contactsMap.set(jid, item);
       if (cleanPhone) {
         acc.contactsMap.set(cleanPhone, item);
         acc.contactsMap.set(`${cleanPhone}@s.whatsapp.net`, item);
       }
-      if (c.lid) acc.contactsMap.set(c.lid, item);
+      if (finalLid) {
+        acc.contactsMap.set(finalLid, item);
+      }
+
+      saveAccountContacts(acc.id, acc.contactsMap);
     };
 
     (sock.ev as any).on('contacts.set', ({ contacts }: any) => {
-      if (Array.isArray(contacts)) contacts.forEach(storeContact);
+      if (Array.isArray(contacts)) contacts.forEach((c) => storeContact(c, 'hp'));
     });
 
     sock.ev.on('messaging-history.set', ({ contacts }: any) => {
-      if (Array.isArray(contacts)) contacts.forEach(storeContact);
+      if (Array.isArray(contacts)) contacts.forEach((c) => storeContact(c, 'hp'));
     });
 
     sock.ev.on('contacts.upsert', (contacts: any[]) => {
-      if (Array.isArray(contacts)) contacts.forEach(storeContact);
+      if (Array.isArray(contacts)) contacts.forEach((c) => storeContact(c, 'hp'));
     });
 
     sock.ev.on('contacts.update', (updates: any[]) => {
@@ -311,7 +412,7 @@ export async function initWhatsApp(accountId = 'acc_1', force = false): Promise<
         for (const u of updates) {
           if (u.id) {
             const existing = acc.contactsMap.get(u.id) || acc.contactsMap.get(u.id.split('@')[0]);
-            storeContact({ ...existing, ...u });
+            storeContact({ ...existing, ...u }, 'hp');
           }
         }
       }
@@ -320,14 +421,11 @@ export async function initWhatsApp(accountId = 'acc_1', force = false): Promise<
     sock.ev.on('messages.upsert', ({ messages }: any) => {
       if (!Array.isArray(messages)) return;
       for (const m of messages) {
-        if (m.key?.fromMe) continue; // Skip own pushName
+        // PENTING: Abaikan pesan keluar (key.fromMe === true) agar pushName sendiri tidak menimpa nama penerima!
+        if (m.key?.fromMe) continue;
         const jid = m.key?.participant || m.key?.remoteJid;
         if (jid && m.pushName) {
-          const phone = jid.split('@')[0].split(':')[0];
-          const existing = acc.contactsMap.get(jid) || acc.contactsMap.get(phone);
-          if (!existing || existing.name === phone || existing.name.startsWith('Peserta ') || existing.name.startsWith('Anggota ')) {
-            storeContact({ id: jid, notify: m.pushName });
-          }
+          storeContact({ id: jid, pushName: m.pushName }, 'push');
         }
       }
     });
@@ -582,27 +680,22 @@ function resolveParticipantInfo(acc: WhatsAppAccountState, p: any, groupName: st
 
 // Fetch WhatsApp Contacts (across connected accounts or specific account)
 export async function getWhatsAppContacts(preferredAccountId?: string): Promise<Array<{ id: string; phone: string; name: string; source: string }>> {
-  const connectedAccounts = Array.from(state.accounts.values()).filter(
-    (a) => a.status === 'connected' && a.socket
-  );
-
-  if (connectedAccounts.length === 0) return [];
-
+  const allAccounts = Array.from(state.accounts.values());
   const targets = preferredAccountId
-    ? connectedAccounts.filter((a) => a.id === preferredAccountId)
-    : connectedAccounts;
+    ? allAccounts.filter((a) => a.id === preferredAccountId)
+    : allAccounts;
 
   const results: Array<{ id: string; phone: string; name: string; source: string }> = [];
   const seenPhones = new Set<string>();
 
   for (const acc of targets) {
-    // Tracked contacts
+    // 1. Kontak dari cache memori/disk akun ini
     for (const [_, c] of acc.contactsMap.entries()) {
       if (c.phone && !seenPhones.has(c.phone)) {
         seenPhones.add(c.phone);
         const displayName = c.name && c.name !== c.phone ? c.name : `+${c.phone}`;
         results.push({
-          id: c.id,
+          id: c.id || `${c.phone}@s.whatsapp.net`,
           phone: c.phone,
           name: displayName,
           source: `${acc.label} (Kontak WA)`,
@@ -610,32 +703,89 @@ export async function getWhatsAppContacts(preferredAccountId?: string): Promise<
       }
     }
 
-    // Group participants
-    try {
-      const groups = await acc.socket.groupFetchAllParticipating();
-      for (const g of Object.values(groups) as any[]) {
-        const groupName = g.subject || 'Grup WA';
-        if (Array.isArray(g.participants)) {
-          for (const p of g.participants) {
-            const info = resolveParticipantInfo(acc, p, groupName);
-            if (info.phone && !seenPhones.has(info.phone)) {
-              seenPhones.add(info.phone);
-              results.push({
-                id: info.id,
-                phone: info.phone,
-                name: info.name,
-                source: groupName,
-              });
+    // 2. Partisipan dari grup WA jika akun sedang terhubung
+    if (acc.status === 'connected' && acc.socket) {
+      try {
+        const groups = await acc.socket.groupFetchAllParticipating();
+        for (const g of Object.values(groups) as any[]) {
+          const groupName = g.subject || 'Grup WA';
+          if (Array.isArray(g.participants)) {
+            for (const p of g.participants) {
+              const info = resolveParticipantInfo(acc, p, groupName);
+              if (info.phone && !seenPhones.has(info.phone)) {
+                seenPhones.add(info.phone);
+                results.push({
+                  id: info.id,
+                  phone: info.phone,
+                  name: info.name,
+                  source: groupName,
+                });
+              }
             }
           }
         }
+      } catch (err) {
+        // ignore
       }
-    } catch (err) {
-      // ignore
     }
   }
 
   return results;
+}
+
+// Re-sync contacts for an account
+export async function resyncWhatsAppContacts(accountId?: string): Promise<{ success: boolean; count: number; message: string }> {
+  const targetAccId = accountId || 'acc_1';
+  const acc = state.accounts.get(targetAccId);
+  if (!acc) {
+    throw new Error(`Akun ${targetAccId} tidak ditemukan.`);
+  }
+
+  if (acc.status !== 'connected' || !acc.socket) {
+    const count = new Set(Array.from(acc.contactsMap.values()).map((c) => c.phone || c.id)).size;
+    return {
+      success: true,
+      count,
+      message: `Akun ${acc.label} belum terhubung ke WhatsApp. Menampilkan ${count} kontak dari memori disk.`,
+    };
+  }
+
+  try {
+    const groups = await acc.socket.groupFetchAllParticipating();
+    let updatedCount = 0;
+    for (const g of Object.values(groups) as any[]) {
+      const groupName = g.subject || 'Grup WA';
+      if (Array.isArray(g.participants)) {
+        for (const p of g.participants) {
+          const info = resolveParticipantInfo(acc, p, groupName);
+          if (info.phone) {
+            const jid = `${info.phone}@s.whatsapp.net`;
+            const existing = acc.contactsMap.get(jid) || acc.contactsMap.get(info.phone);
+            const nama = info.name && !info.name.startsWith('Peserta ') && !info.name.startsWith('Anggota ') ? info.name : existing?.name || `+${info.phone}`;
+            const item = { id: jid, phone: info.phone, name: nama, lid: p.lid || existing?.lid };
+            acc.contactsMap.set(jid, item);
+            acc.contactsMap.set(info.phone, item);
+            if (p.lid) acc.contactsMap.set(p.lid, item);
+            updatedCount++;
+          }
+        }
+      }
+    }
+    saveAccountContacts(acc.id, acc.contactsMap);
+    const totalCount = new Set(Array.from(acc.contactsMap.values()).map((c) => c.phone || c.id)).size;
+    return {
+      success: true,
+      count: totalCount,
+      message: `Sinkronisasi kontak berhasil untuk ${acc.label}! ${totalCount} kontak tersimpan.`,
+    };
+  } catch (err: any) {
+    const totalCount = new Set(Array.from(acc.contactsMap.values()).map((c) => c.phone || c.id)).size;
+    return {
+      success: true,
+      count: totalCount,
+      message: `Kontak dari disk disinkronkan untuk ${acc.label}. Total: ${totalCount} kontak.`,
+    };
+  }
 }
 
 // Fetch Group Participants
