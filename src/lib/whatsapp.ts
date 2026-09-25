@@ -529,28 +529,32 @@ function resolveParticipantInfo(acc: WhatsAppAccountState, p: any, groupName: st
     phone = rawId.split('@')[0].split(':')[0];
   }
 
+  const isLid = !phone || phone.length >= 14 || rawId.endsWith('@lid');
+  const targetPhone = phone || rawId.split('@')[0].split(':')[0];
+
   // Look up in contactsMap
   const known =
     (rawId ? acc.contactsMap.get(rawId) : null) ||
     (lidJid ? acc.contactsMap.get(lidJid) : null) ||
-    (phone ? acc.contactsMap.get(phone) : null) ||
-    (phone ? acc.contactsMap.get(`${phone}@s.whatsapp.net`) : null);
+    (targetPhone ? acc.contactsMap.get(targetPhone) : null) ||
+    (targetPhone ? acc.contactsMap.get(`${targetPhone}@s.whatsapp.net`) : null);
 
   let name = '';
-  if (known?.name && known.name !== phone && known.name !== rawId) {
+  if (known?.name && known.name !== targetPhone && known.name !== rawId) {
     name = known.name;
   } else if (p.name || p.notify || p.verifiedName) {
     name = p.name || p.notify || p.verifiedName;
   }
 
-  const destinationId = phone ? `${phone}@s.whatsapp.net` : rawId;
-  const displayPhone = phone || rawId.split('@')[0];
-  const finalName = name || `Peserta ${groupName} (+${displayPhone})`;
+  const destinationId = rawId || (phone ? `${phone}@s.whatsapp.net` : '');
+  const displayPhone = targetPhone;
+  const finalName = name || (isLid ? `Peserta ${groupName} (ID: ${displayPhone.slice(-4)})` : `Peserta ${groupName} (+${displayPhone})`);
 
   return {
     id: destinationId,
     phone: displayPhone,
     name: finalName,
+    isLid,
   };
 }
 
