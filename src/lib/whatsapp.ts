@@ -516,8 +516,6 @@ export async function getWhatsAppGroups(preferredAccountId?: string): Promise<{ 
   return Array.from(groupsMap.values());
 }
 
-}
-
 // Helper to resolve participant details (Phone, LID, and Saved Name)
 function resolveParticipantInfo(acc: WhatsAppAccountState, p: any, groupName: string) {
   const rawId = p.id || '';
