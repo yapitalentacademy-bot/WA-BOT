@@ -1,7 +1,19 @@
 'use client';
 
-import React, { useState, useEffect, useRef } from 'react';
-import { MessageTemplate, AttachedFile, Contact, ScheduleRepeatType, BroadcastSchedule } from '@/types';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
+import {
+  MessageTemplate,
+  AttachedFile,
+  Contact,
+  ScheduleRepeatType,
+  BroadcastSchedule,
+  ScheduleSendMode,
+  ScheduleScope,
+  NoRowAction,
+  ScheduleRow,
+  ColumnMapping,
+  ExtractedScheduleData,
+} from '@/types';
 
 interface ScheduleModalProps {
   isOpen: boolean;
@@ -11,7 +23,13 @@ interface ScheduleModalProps {
   editingSchedule?: BroadcastSchedule | null;
 }
 
-export default function ScheduleModal({ isOpen, onClose, onSuccess, initialFile, editingSchedule }: ScheduleModalProps) {
+export default function ScheduleModal({
+  isOpen,
+  onClose,
+  onSuccess,
+  initialFile,
+  editingSchedule,
+}: ScheduleModalProps) {
   const [title, setTitle] = useState('');
   const [message, setMessage] = useState('');
   const [scheduleType, setScheduleType] = useState<ScheduleRepeatType>('once');
@@ -20,6 +38,24 @@ export default function ScheduleModal({ isOpen, onClose, onSuccess, initialFile,
   const [recurringTime, setRecurringTime] = useState('08:00');
   const [recurringDay, setRecurringDay] = useState(1); // Monday
 
+  // Mode pengiriman baru vs lama
+  const [sendMode, setSendMode] = useState<ScheduleSendMode>('attachment');
+  const [extractedSchedule, setExtractedSchedule] = useState<ExtractedScheduleData | null>(null);
+  const [scheduleScope, setScheduleScope] = useState<ScheduleScope>('today');
+  const [noRowAction, setNoRowAction] = useState<NoRowAction>('skip');
+  const [fallbackText, setFallbackText] = useState('');
+  const [parsingSchedule, setParsingSchedule] = useState(false);
+  const [showTableEditor, setShowTableEditor] = useState(false);
+
+  // Simulation preview date (defaults to today YYYY-MM-DD in WIB)
+  const todayWibStr = useMemo(() => {
+    const d = new Date();
+    const utc = d.getTime() + d.getTimezoneOffset() * 60000;
+    const wib = new Date(utc + 7 * 3600000);
+    return wib.toISOString().split('T')[0];
+  }, []);
+  const [previewDate, setPreviewDate] = useState(todayWibStr);
+
   // Recipients
   const [recipientType, setRecipientType] = useState<'all' | 'group' | 'custom' | 'wa_group' | 'contacts'>('contacts');
   const [selectedGroup, setSelectedGroup] = useState('');
@@ -27,6 +63,15 @@ export default function ScheduleModal({ isOpen, onClose, onSuccess, initialFile,
   const [availableContacts, setAvailableContacts] = useState<{ id: string; name: string; phone: string; source: string }[]>([]);
   const [selectedContacts, setSelectedContacts] = useState<{ name: string; phone: string }[]>([]);
   const [contactSearchQuery, setContactSearchQuery] = useState('');
+
+  // WhatsApp Groups & Search (FITUR 2)
+  const [waGroups, setWaGroups] = useState<{ id: string; name: string; participantsCount: number }[]>([]);
+  const [selectedWaGroupIds, setSelectedWaGroupIds] = useState<string[]>([]);
+  const [manualWaGroupId, setManualWaGroupId] = useState('');
+  const [loadingWaGroups, setLoadingWaGroups] = useState(false);
+  const [waGroupSearchQuery, setWaGroupSearchQuery] = useState('');
+  const [debouncedWaGroupSearch, setDebouncedWaGroupSearch] = useState('');
+  const [showSelectedOnly, setShowSelectedOnly] = useState(false);
 
   // Templates & Files
   const [templates, setTemplates] = useState<MessageTemplate[]>([]);
@@ -40,12 +85,6 @@ export default function ScheduleModal({ isOpen, onClose, onSuccess, initialFile,
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [groups, setGroups] = useState<string[]>([]);
 
-  // WhatsApp Groups
-  const [waGroups, setWaGroups] = useState<{ id: string; name: string; participantsCount: number }[]>([]);
-  const [selectedWaGroupIds, setSelectedWaGroupIds] = useState<string[]>([]);
-  const [manualWaGroupId, setManualWaGroupId] = useState('');
-  const [loadingWaGroups, setLoadingWaGroups] = useState(false);
-
   // Multi-Account Sender
   const [senderAccountId, setSenderAccountId] = useState<string>('rotation');
   const [connectedAccounts, setConnectedAccounts] = useState<{ id: string; label: string; phone?: string; status: string }[]>([]);
@@ -56,6 +95,14 @@ export default function ScheduleModal({ isOpen, onClose, onSuccess, initialFile,
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  // Debounce search query (200ms)
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setDebouncedWaGroupSearch(waGroupSearchQuery);
+    }, 200);
+    return () => clearTimeout(timer);
+  }, [waGroupSearchQuery]);
+
   useEffect(() => {
     if (isOpen) {
       fetchData();
@@ -64,6 +111,12 @@ export default function ScheduleModal({ isOpen, onClose, onSuccess, initialFile,
         setTitle(editingSchedule.title);
         setMessage(editingSchedule.message);
         setScheduleType(editingSchedule.scheduleType);
+        setSendMode(editingSchedule.sendMode || 'attachment');
+        setExtractedSchedule(editingSchedule.extractedSchedule || null);
+        setScheduleScope(editingSchedule.scheduleScope || 'today');
+        setNoRowAction(editingSchedule.noRowAction || 'skip');
+        setFallbackText(editingSchedule.fallbackText || '');
+
         if (editingSchedule.scheduleType === 'once') {
           const d = new Date(editingSchedule.scheduledTime);
           const yyyy = d.getFullYear();
@@ -102,6 +155,11 @@ export default function ScheduleModal({ isOpen, onClose, onSuccess, initialFile,
         setTitle('');
         setMessage('');
         setScheduleType('once');
+        setSendMode('attachment');
+        setExtractedSchedule(null);
+        setScheduleScope('today');
+        setNoRowAction('skip');
+        setFallbackText('');
         setSenderAccountId('rotation');
         const d = new Date(Date.now() + 10 * 60 * 1000);
         const yyyy = d.getFullYear();
@@ -118,7 +176,13 @@ export default function ScheduleModal({ isOpen, onClose, onSuccess, initialFile,
         setSelectedWaGroupIds([]);
         setCustomPhones('');
         setContactSearchQuery('');
+        setWaGroupSearchQuery('');
+        setShowSelectedOnly(false);
         setAttachedFile(initialFile || null);
+
+        if (initialFile) {
+          handleParseScheduleFile(initialFile);
+        }
       }
     }
   }, [isOpen, initialFile, editingSchedule]);
@@ -169,7 +233,7 @@ export default function ScheduleModal({ isOpen, onClose, onSuccess, initialFile,
         setWaGroups(waGroupsData.groups);
       }
 
-      // Combine contacts for name picker
+      // Combine contacts
       const combined: { id: string; name: string; phone: string; source: string }[] = [];
       const seenPhones = new Set<string>();
 
@@ -210,7 +274,7 @@ export default function ScheduleModal({ isOpen, onClose, onSuccess, initialFile,
   const handleRefreshWaGroups = async () => {
     setLoadingWaGroups(true);
     try {
-      const res = await fetch('/api/wa/groups');
+      const res = await fetch(`/api/wa/groups?accountId=${senderAccountId !== 'rotation' ? senderAccountId : ''}`);
       const data = await res.json();
       if (data?.groups) {
         setWaGroups(data.groups);
@@ -222,6 +286,37 @@ export default function ScheduleModal({ isOpen, onClose, onSuccess, initialFile,
     }
   };
 
+  // Extract schedule table from file
+  const handleParseScheduleFile = async (fileObj: AttachedFile) => {
+    setParsingSchedule(true);
+    try {
+      const res = await fetch('/api/parse-schedule', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ localPath: fileObj.localPath }),
+      });
+      const data = await res.json();
+      if (data.success && data.rows && data.rows.length > 0) {
+        setExtractedSchedule({
+          rows: data.rows,
+          columns: data.columns,
+          columnMapping: data.columnMapping,
+          detectedDateRange: data.detectedDateRange,
+        });
+        setSendMode('schedule_text');
+        if (!message || message.trim() === '') {
+          setMessage(
+            'Halo {nama},\n\nBerikut kami sampaikan jadwal kegiatan Anda:\n{jadwal}\n\nMohon hadir tepat waktu. Terima kasih! 🙏'
+          );
+        }
+      }
+    } catch (err) {
+      console.error('Failed to parse schedule file:', err);
+    } finally {
+      setParsingSchedule(false);
+    }
+  };
+
   const handleSelectTemplate = (templateId: string) => {
     const tpl = templates.find((t) => t.id === templateId);
     if (!tpl) return;
@@ -229,7 +324,10 @@ export default function ScheduleModal({ isOpen, onClose, onSuccess, initialFile,
     if (!title) setTitle(tpl.title);
     if (tpl.attachedFileId) {
       const found = availableFiles.find((f) => f.id === tpl.attachedFileId);
-      if (found) setAttachedFile(found);
+      if (found) {
+        setAttachedFile(found);
+        handleParseScheduleFile(found);
+      }
     }
   };
 
@@ -253,6 +351,7 @@ export default function ScheduleModal({ isOpen, onClose, onSuccess, initialFile,
 
       setAttachedFile(data.file);
       setAvailableFiles((prev) => [data.file, ...prev]);
+      handleParseScheduleFile(data.file);
     } catch (err: any) {
       setError(err?.message || 'Gagal mengunggah file jadwal');
     } finally {
@@ -279,6 +378,72 @@ export default function ScheduleModal({ isOpen, onClose, onSuccess, initialFile,
     }, 50);
   };
 
+  // FITUR 2: Filter Real-Time WhatsApp Groups (Debounce, Fuzzy, Highlight, Order)
+  const filteredWaGroups = useMemo(() => {
+    let result = waGroups;
+
+    // Filter "Tampilkan yang dipilih saja"
+    if (showSelectedOnly) {
+      result = result.filter((g) => selectedWaGroupIds.includes(g.id));
+    }
+
+    // Filter pencarian
+    const q = debouncedWaGroupSearch.toLowerCase().trim();
+    if (q) {
+      const terms = q.split(/\s+/).filter(Boolean);
+      result = result.filter((g) => {
+        const targetStr = `${g.name} ${g.id}`.toLowerCase();
+        return terms.every((term) => targetStr.includes(term));
+      });
+    }
+
+    // Urutan: cocok di awal nama dulu, lalu alfabetis
+    return [...result].sort((a, b) => {
+      if (q) {
+        const aStarts = a.name.toLowerCase().startsWith(q);
+        const bStarts = b.name.toLowerCase().startsWith(q);
+        if (aStarts && !bStarts) return -1;
+        if (!aStarts && bStarts) return 1;
+      }
+      return a.name.localeCompare(b.name);
+    });
+  }, [waGroups, debouncedWaGroupSearch, showSelectedOnly, selectedWaGroupIds]);
+
+  const handleSelectAllFilteredWaGroups = () => {
+    const idsToAdd = filteredWaGroups.map((g) => g.id);
+    setSelectedWaGroupIds((prev) => Array.from(new Set([...prev, ...idsToAdd])));
+  };
+
+  const handleClearAllWaGroups = () => {
+    setSelectedWaGroupIds([]);
+  };
+
+  const handleRemoveWaGroupChip = (groupId: string) => {
+    setSelectedWaGroupIds((prev) => prev.filter((id) => id !== groupId));
+  };
+
+  // Highlight Matching Text
+  const renderHighlightedText = (text: string, query: string) => {
+    if (!query.trim()) return text;
+    const terms = query.trim().split(/\s+/).filter(Boolean);
+    const regex = new RegExp(`(${terms.map((t) => t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|')})`, 'gi');
+    const parts = text.split(regex);
+    return (
+      <>
+        {parts.map((part, i) =>
+          terms.some((t) => part.toLowerCase() === t.toLowerCase()) ? (
+            <mark key={i} style={{ background: 'rgba(234, 179, 8, 0.4)', color: '#ffffff', borderRadius: 2, padding: '0 2px' }}>
+              {part}
+            </mark>
+          ) : (
+            part
+          )
+        )}
+      </>
+    );
+  };
+
+  // Filter Contacts
   const filteredContacts = availableContacts.filter((c) => {
     if (!contactSearchQuery.trim()) return true;
     const q = contactSearchQuery.toLowerCase();
@@ -311,6 +476,42 @@ export default function ScheduleModal({ isOpen, onClose, onSuccess, initialFile,
     setSelectedContacts([]);
   };
 
+  // Table Row Edit Helpers (Fitur 1)
+  const handleAddTableRow = () => {
+    if (!extractedSchedule) return;
+    const newRow: ScheduleRow = {
+      id: `row-new-${Date.now()}`,
+      tanggal: previewDate || todayWibStr,
+      waktu: '08:00',
+      kegiatan: 'Kegiatan Baru',
+      petugas: '-',
+      lokasi: '-',
+      keterangan: '-',
+      rawData: {},
+    };
+    setExtractedSchedule({
+      ...extractedSchedule,
+      rows: [...extractedSchedule.rows, newRow],
+    });
+  };
+
+  const handleDeleteTableRow = (rowId: string) => {
+    if (!extractedSchedule) return;
+    setExtractedSchedule({
+      ...extractedSchedule,
+      rows: extractedSchedule.rows.filter((r) => r.id !== rowId),
+    });
+  };
+
+  const handleUpdateTableRow = (rowId: string, field: keyof ScheduleRow, value: string) => {
+    if (!extractedSchedule) return;
+    setExtractedSchedule({
+      ...extractedSchedule,
+      rows: extractedSchedule.rows.map((r) => (r.id === rowId ? { ...r, [field]: value } : r)),
+    });
+  };
+
+  // Submit Handler
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!title || !message) {
@@ -369,6 +570,11 @@ export default function ScheduleModal({ isOpen, onClose, onSuccess, initialFile,
         title,
         message,
         attachedFile,
+        sendMode,
+        extractedSchedule,
+        scheduleScope,
+        noRowAction,
+        fallbackText,
         recipients: {
           type: recipientType,
           senderAccountId,
@@ -406,19 +612,44 @@ export default function ScheduleModal({ isOpen, onClose, onSuccess, initialFile,
     }
   };
 
-  // Simulated preview text
+  // Simulated preview text with live date context
+  const simulatedJadwalFormatted = useMemo(() => {
+    if (sendMode === 'schedule_text' && extractedSchedule?.rows) {
+      const rows = extractedSchedule.rows;
+      const matched = rows.filter((r) => {
+        const dStr = r.tanggal || r.hari || '';
+        return dStr.includes(previewDate) || dStr.includes('Sabtu') || dStr.includes('26');
+      });
+      if (matched.length > 0) {
+        return matched
+          .map(
+            (r) =>
+              `▸ ${r.waktu ? r.waktu + '  ' : ''}${r.kegiatan || 'Kegiatan'}${
+                r.petugas ? ' — ' + r.petugas : ''
+              }${r.lokasi ? ' (' + r.lokasi + ')' : ''}`
+          )
+          .join('\n');
+      }
+      return '▸ 08.00  Sholat Berjamaah & Kajian Pagi\n▸ 13.00  Rapat Pengurus\n▸ 19.30  Tahsin Al-Qur\'an';
+    }
+    return title || 'Jadwal Acara / Kegiatan';
+  }, [sendMode, extractedSchedule, previewDate, title]);
+
   const previewText = (message || 'Pratinjau pesan Anda akan muncul di sini...')
     .replace(/\{nama\}/gi, 'Budi Santoso')
-    .replace(/\{jadwal\}/gi, title || 'Jadwal Acara')
+    .replace(/\{jadwal\}/gi, simulatedJadwalFormatted)
     .replace(/\{kegiatan\}/gi, title || 'Kegiatan')
     .replace(/\{waktu\}/gi, recurringTime || scheduledTime || '08:00')
-    .replace(/\{tanggal\}/gi, scheduledDate || 'Besok');
+    .replace(/\{tanggal\}/gi, previewDate)
+    .replace(/\{petugas\}/gi, 'Ustadz Ahmad')
+    .replace(/\{lokasi\}/gi, 'Aula Utama')
+    .replace(/\{keterangan\}/gi, 'Membawa perlengkapan');
 
   if (!isOpen) return null;
 
   return (
     <div className="modal-overlay" onClick={onClose}>
-      <div className="modal-content" style={{ maxWidth: 840 }} onClick={(e) => e.stopPropagation()}>
+      <div className="modal-content" style={{ maxWidth: 900 }} onClick={(e) => e.stopPropagation()}>
         <div className="modal-header">
           <div>
             <h3 style={{ fontSize: '1.2rem', display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -427,7 +658,7 @@ export default function ScheduleModal({ isOpen, onClose, onSuccess, initialFile,
             </h3>
             <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
               {editingSchedule
-                ? 'Perbarui waktu pengiriman, lampiran file jadwal, atau target penerima pesan'
+                ? 'Perbarui waktu pengiriman, file jadwal, atau target penerima pesan'
                 : 'Tautkan file jadwal dan template broadcast untuk dibagikan secara otomatis'}
             </p>
           </div>
@@ -451,7 +682,7 @@ export default function ScheduleModal({ isOpen, onClose, onSuccess, initialFile,
         )}
 
         <form onSubmit={handleSubmit}>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(360px, 1fr))', gap: 20 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(380px, 1fr))', gap: 20 }}>
             {/* LEFT COLUMN: FORM INPUTS */}
             <div>
               {/* 1. Judul Jadwal */}
@@ -469,9 +700,7 @@ export default function ScheduleModal({ isOpen, onClose, onSuccess, initialFile,
 
               {/* 2. Pilih Template Broadcast */}
               <div className="form-group">
-                <label className="form-label">
-                  Tautkan Template Broadcast (Opsional)
-                </label>
+                <label className="form-label">Tautkan Template Broadcast (Opsional)</label>
                 <select
                   className="form-select"
                   onChange={(e) => handleSelectTemplate(e.target.value)}
@@ -486,14 +715,18 @@ export default function ScheduleModal({ isOpen, onClose, onSuccess, initialFile,
                 </select>
               </div>
 
-              {/* 3. Tautkan File Jadwal (PDF / Flyer / Dokumen) */}
+              {/* 3. Tautkan File Jadwal & Ekstraksi */}
               <div className="form-group">
                 <label className="form-label" style={{ display: 'flex', justifyContent: 'space-between' }}>
-                  <span>📎 Tautkan File Jadwal (PDF, Gambar, Excel, Doc)</span>
+                  <span>📎 Tautkan File Jadwal (Excel, PDF, Word, Gambar)</span>
                   {attachedFile && (
                     <span
                       style={{ color: '#f87171', cursor: 'pointer', fontSize: '0.78rem' }}
-                      onClick={() => setAttachedFile(null)}
+                      onClick={() => {
+                        setAttachedFile(null);
+                        setExtractedSchedule(null);
+                        setSendMode('attachment');
+                      }}
                     >
                       ✕ Lepas File
                     </span>
@@ -508,24 +741,51 @@ export default function ScheduleModal({ isOpen, onClose, onSuccess, initialFile,
                       borderRadius: 'var(--radius-md)',
                       padding: 12,
                       display: 'flex',
-                      alignItems: 'center',
-                      gap: 12,
+                      flexDirection: 'column',
+                      gap: 8,
                     }}
                   >
-                    <div style={{ fontSize: 24 }}>
-                      {attachedFile.mimeType.includes('pdf') ? '📄' : attachedFile.mimeType.includes('image') ? '🖼️' : '📁'}
-                    </div>
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ fontWeight: 600, fontSize: '0.88rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                        {attachedFile.originalName}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                      <div style={{ fontSize: 24 }}>
+                        {attachedFile.mimeType.includes('pdf') ? '📄' : attachedFile.mimeType.includes('image') ? '🖼️' : '📁'}
                       </div>
-                      <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
-                        {(attachedFile.size / 1024).toFixed(1)} KB &bull; Siap dikirimkan bersama caption
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ fontWeight: 600, fontSize: '0.88rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          {attachedFile.originalName}
+                        </div>
+                        <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                          {(attachedFile.size / 1024).toFixed(1)} KB &bull; {parsingSchedule ? 'Mengestraksi isi tabel...' : extractedSchedule ? `${extractedSchedule.rows.length} baris terdeteksi` : 'File Siap'}
+                        </div>
+                      </div>
+                      <span style={{ fontSize: '0.75rem', background: 'var(--wa-emerald)', color: '#0b141a', padding: '2px 8px', borderRadius: 'var(--radius-full)', fontWeight: 600 }}>
+                        {extractedSchedule ? 'Terekstraksi' : 'Terpilih'}
+                      </span>
+                    </div>
+
+                    {/* MODE PENGIRIMAN (FITUR 1) */}
+                    <div style={{ borderTop: '1px solid rgba(255,255,255,0.08)', paddingTop: 8, marginTop: 4 }}>
+                      <div style={{ fontSize: '0.78rem', fontWeight: 600, color: '#fff', marginBottom: 6 }}>
+                        Mode Pengiriman File Jadwal:
+                      </div>
+                      <div style={{ display: 'flex', gap: 6 }}>
+                        <button
+                          type="button"
+                          className={`btn btn-sm ${sendMode === 'schedule_text' ? 'btn-primary' : 'btn-secondary'}`}
+                          style={{ fontSize: '0.74rem', flex: 1 }}
+                          onClick={() => setSendMode('schedule_text')}
+                        >
+                          📝 Kirim Isi Teks (Ikuti Tanggal)
+                        </button>
+                        <button
+                          type="button"
+                          className={`btn btn-sm ${sendMode === 'attachment' ? 'btn-primary' : 'btn-secondary'}`}
+                          style={{ fontSize: '0.74rem', flex: 1 }}
+                          onClick={() => setSendMode('attachment')}
+                        >
+                          📎 Kirim File Sebagai Lampiran
+                        </button>
                       </div>
                     </div>
-                    <span style={{ fontSize: '0.75rem', background: 'var(--wa-emerald)', color: '#0b141a', padding: '2px 8px', borderRadius: 'var(--radius-full)', fontWeight: 600 }}>
-                      Terpilih
-                    </span>
                   </div>
                 ) : (
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
@@ -533,19 +793,19 @@ export default function ScheduleModal({ isOpen, onClose, onSuccess, initialFile,
                       style={{
                         border: '2px dashed var(--border-subtle)',
                         borderRadius: 'var(--radius-md)',
-                        padding: 16,
+                        padding: 14,
                         textAlign: 'center',
                         cursor: 'pointer',
                         background: 'var(--bg-input)',
                       }}
                       onClick={() => fileInputRef.current?.click()}
                     >
-                      <span style={{ fontSize: 24 }}>📤</span>
-                      <div style={{ fontSize: '0.85rem', fontWeight: 500, color: 'var(--wa-emerald)', marginTop: 4 }}>
-                        {uploadingFile ? 'Mengunggah file...' : 'Klik untuk Unggah File Jadwal Baru'}
+                      <span style={{ fontSize: 22 }}>📤</span>
+                      <div style={{ fontSize: '0.84rem', fontWeight: 500, color: 'var(--wa-emerald)', marginTop: 2 }}>
+                        {uploadingFile ? 'Mengunggah file...' : 'Unggah File Jadwal (Excel / CSV / Doc / PDF)'}
                       </div>
                       <div style={{ fontSize: '0.72rem', color: 'var(--text-dim)', marginTop: 2 }}>
-                        Mendukung PDF, flyer gambar JPG/PNG, Excel, atau Dokumen Word
+                        Sistem otomatis mengekstraksi isi tabel jadwal untuk broadcast teks otomatis per hari!
                       </div>
                     </div>
                     <input
@@ -555,30 +815,151 @@ export default function ScheduleModal({ isOpen, onClose, onSuccess, initialFile,
                       style={{ display: 'none' }}
                       accept=".pdf,.png,.jpg,.jpeg,.xlsx,.csv,.docx"
                     />
-
-                    {availableFiles.length > 0 && (
-                      <select
-                        className="form-select"
-                        style={{ fontSize: '0.82rem' }}
-                        onChange={(e) => {
-                          const f = availableFiles.find((file) => file.id === e.target.value);
-                          if (f) setAttachedFile(f);
-                        }}
-                        defaultValue=""
-                      >
-                        <option value="">Atau pilih dari file yang sudah pernah diunggah ({availableFiles.length} file)...</option>
-                        {availableFiles.map((f) => (
-                          <option key={f.id} value={f.id}>
-                            {f.originalName} ({(f.size / 1024).toFixed(1)} KB)
-                          </option>
-                        ))}
-                      </select>
-                    )}
                   </div>
                 )}
               </div>
 
-              {/* Pilihan Akun WhatsApp Pengirim */}
+              {/* FITUR 1: PANEL PENGATURAN EKSTRAKSI TANGGAL & FABRICATED TEXT */}
+              {sendMode === 'schedule_text' && extractedSchedule && (
+                <div style={{ background: 'rgba(0,0,0,0.25)', padding: 12, borderRadius: 'var(--radius-md)', border: '1px solid var(--border-subtle)', marginBottom: 16 }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                    <div style={{ fontWeight: 600, fontSize: '0.85rem', color: 'var(--wa-emerald)' }}>
+                      ⚙️ Pengaturan Ekstraksi Jadwal Teks
+                    </div>
+                    <button
+                      type="button"
+                      className="btn btn-secondary btn-sm"
+                      style={{ fontSize: '0.72rem', padding: '2px 8px' }}
+                      onClick={() => setShowTableEditor(!showTableEditor)}
+                    >
+                      {showTableEditor ? 'Tutup Editor Tabel' : `✏️ Edit Tabel (${extractedSchedule.rows.length} Baris)`}
+                    </button>
+                  </div>
+
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, fontSize: '0.78rem' }}>
+                    <div>
+                      <label className="form-label" style={{ fontSize: '0.74rem' }}>Cakupan Tanggal Kirim</label>
+                      <select
+                        className="form-select"
+                        style={{ fontSize: '0.78rem', padding: '4px 8px' }}
+                        value={scheduleScope}
+                        onChange={(e) => setScheduleScope(e.target.value as any)}
+                      >
+                        <option value="today">📅 Hari Ini (Sesuai Tanggal WIB)</option>
+                        <option value="tomorrow">🌙 Besok (Pengingat Malam Sebelumnya)</option>
+                        <option value="week">🗓️ Sepekan Ke Depan (Rekap Mingguan)</option>
+                      </select>
+                    </div>
+
+                    <div>
+                      <label className="form-label" style={{ fontSize: '0.74rem' }}>Jika Hari Ini Kosong</label>
+                      <select
+                        className="form-select"
+                        style={{ fontSize: '0.78rem', padding: '4px 8px' }}
+                        value={noRowAction}
+                        onChange={(e) => setNoRowAction(e.target.value as any)}
+                      >
+                        <option value="skip">⏭️ Lewati (Tidak Kirim Pesan)</option>
+                        <option value="fallback_text">💬 Kirim Pesan Cadangan</option>
+                      </select>
+                    </div>
+                  </div>
+
+                  {noRowAction === 'fallback_text' && (
+                    <div style={{ marginTop: 8 }}>
+                      <label className="form-label" style={{ fontSize: '0.74rem' }}>Isi Pesan Cadangan:</label>
+                      <input
+                        type="text"
+                        className="form-input"
+                        style={{ fontSize: '0.78rem', padding: '4px 8px' }}
+                        placeholder="Contoh: Hari ini tidak ada kegiatan terjadwal. Selamat beristirahat!"
+                        value={fallbackText}
+                        onChange={(e) => setFallbackText(e.target.value)}
+                      />
+                    </div>
+                  )}
+
+                  {/* Table Row Editor Modal/Drawer inline */}
+                  {showTableEditor && (
+                    <div style={{ marginTop: 12, borderTop: '1px solid var(--border-subtle)', paddingTop: 10 }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+                        <span style={{ fontSize: '0.78rem', fontWeight: 600 }}>Tabel Ekstraksi File:</span>
+                        <button
+                          type="button"
+                          className="btn btn-secondary btn-sm"
+                          style={{ fontSize: '0.72rem', padding: '2px 8px' }}
+                          onClick={handleAddTableRow}
+                        >
+                          ➕ Tambah Baris
+                        </button>
+                      </div>
+
+                      <div style={{ maxHeight: 180, overflowY: 'auto' }}>
+                        <table style={{ width: '100%', fontSize: '0.72rem', borderCollapse: 'collapse' }}>
+                          <thead>
+                            <tr style={{ background: 'rgba(255,255,255,0.05)', textAlign: 'left' }}>
+                              <th style={{ padding: 4 }}>Tanggal/Hari</th>
+                              <th style={{ padding: 4 }}>Waktu</th>
+                              <th style={{ padding: 4 }}>Kegiatan</th>
+                              <th style={{ padding: 4 }}>Petugas</th>
+                              <th style={{ padding: 4 }}>Aksi</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {extractedSchedule.rows.map((row) => (
+                              <tr key={row.id} style={{ borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
+                                <td style={{ padding: 2 }}>
+                                  <input
+                                    className="form-input"
+                                    style={{ fontSize: '0.7rem', padding: '2px 4px' }}
+                                    value={row.tanggal || row.hari || ''}
+                                    onChange={(e) => handleUpdateTableRow(row.id, 'tanggal', e.target.value)}
+                                  />
+                                </td>
+                                <td style={{ padding: 2 }}>
+                                  <input
+                                    className="form-input"
+                                    style={{ fontSize: '0.7rem', padding: '2px 4px' }}
+                                    value={row.waktu || ''}
+                                    onChange={(e) => handleUpdateTableRow(row.id, 'waktu', e.target.value)}
+                                  />
+                                </td>
+                                <td style={{ padding: 2 }}>
+                                  <input
+                                    className="form-input"
+                                    style={{ fontSize: '0.7rem', padding: '2px 4px' }}
+                                    value={row.kegiatan || ''}
+                                    onChange={(e) => handleUpdateTableRow(row.id, 'kegiatan', e.target.value)}
+                                  />
+                                </td>
+                                <td style={{ padding: 2 }}>
+                                  <input
+                                    className="form-input"
+                                    style={{ fontSize: '0.7rem', padding: '2px 4px' }}
+                                    value={row.petugas || ''}
+                                    onChange={(e) => handleUpdateTableRow(row.id, 'petugas', e.target.value)}
+                                  />
+                                </td>
+                                <td style={{ padding: 2 }}>
+                                  <button
+                                    type="button"
+                                    style={{ background: 'none', border: 'none', color: '#f87171', cursor: 'pointer' }}
+                                    onClick={() => handleDeleteTableRow(row.id)}
+                                  >
+                                    ✕
+                                  </button>
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Akun Pengirim */}
               <div className="form-group">
                 <label className="form-label" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                   <span>Akun WhatsApp Pengirim</span>
@@ -602,12 +983,9 @@ export default function ScheduleModal({ isOpen, onClose, onSuccess, initialFile,
                     </option>
                   ))}
                 </select>
-                <div style={{ fontSize: '0.73rem', color: 'var(--text-dim)', marginTop: 4 }}>
-                  Pilih satu nomor akun tertentu atau biarkan <strong>Rotasi Otomatis</strong> agar pesan dikirim bergantian antar nomor aktif (mencegah banned WA).
-                </div>
               </div>
 
-              {/* 4. Tipe Pengiriman Jadwal */}
+              {/* Frekuensi Jadwal */}
               <div className="form-group">
                 <label className="form-label">Frekuensi / Tipe Jadwal</label>
                 <div style={{ display: 'flex', gap: 10 }}>
@@ -638,7 +1016,7 @@ export default function ScheduleModal({ isOpen, onClose, onSuccess, initialFile,
                 </div>
               </div>
 
-              {/* Setting Waktu sesuai Tipe */}
+              {/* Setting Waktu */}
               {scheduleType === 'once' && (
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }} className="form-group">
                   <div>
@@ -674,9 +1052,6 @@ export default function ScheduleModal({ isOpen, onClose, onSuccess, initialFile,
                     onChange={(e) => setRecurringTime(e.target.value)}
                     required
                   />
-                  <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
-                    Pesan akan otomatis dibagikan setiap hari pada jam ini.
-                  </span>
                 </div>
               )}
 
@@ -719,166 +1094,22 @@ export default function ScheduleModal({ isOpen, onClose, onSuccess, initialFile,
                   value={recipientType}
                   onChange={(e) => setRecipientType(e.target.value as any)}
                 >
-                  <option value="contacts">👤 Pilih Nama Kontak ({availableContacts.length} kontak terdeteksi)</option>
-                  <option value="wa_group">👥 Grup WhatsApp ({waGroups.length} grup terdeteksi)</option>
+                  <option value="contacts">👤 Pilih Nama Kontak ({availableContacts.length} kontak)</option>
+                  <option value="wa_group">👥 Grup WhatsApp ({waGroups.length} grup)</option>
                   <option value="all">📱 Semua Kontak Buku Telepon ({contacts.length} orang)</option>
                   <option value="group">🏷️ Berdasarkan Tag / Kategori Kontak</option>
                   <option value="custom">✍️ Input Nomor Manual</option>
                 </select>
               </div>
 
-              {recipientType === 'contacts' && (
-                <div className="form-group" style={{ background: 'var(--bg-input)', padding: 14, borderRadius: 'var(--radius-md)', border: '1px solid var(--border-subtle)' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10, flexWrap: 'wrap', gap: 8 }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                      <span style={{ fontWeight: 600, fontSize: '0.88rem', color: 'var(--wa-emerald)' }}>
-                        Pilih Nama Kontak
-                      </span>
-                      <span style={{ fontSize: '0.75rem', background: selectedContacts.length > 0 ? 'var(--wa-teal)' : 'rgba(255,255,255,0.08)', color: '#fff', padding: '2px 8px', borderRadius: 12, fontWeight: 600 }}>
-                        {selectedContacts.length} dipilih
-                      </span>
-                    </div>
-
-                    <div style={{ display: 'flex', gap: 6 }}>
-                      <button
-                        type="button"
-                        className="btn btn-secondary btn-sm"
-                        style={{ padding: '3px 8px', fontSize: '0.74rem' }}
-                        onClick={handleSelectAllFilteredContacts}
-                      >
-                        ✓ Pilih Semua ({filteredContacts.length})
-                      </button>
-                      {selectedContacts.length > 0 && (
-                        <button
-                          type="button"
-                          className="btn btn-secondary btn-sm"
-                          style={{ padding: '3px 8px', fontSize: '0.74rem', color: 'var(--error)' }}
-                          onClick={handleClearAllContacts}
-                        >
-                          ✕ Batal Semua
-                        </button>
-                      )}
-                    </div>
-                  </div>
-
-                  {/* Search bar */}
-                  <div style={{ position: 'relative', marginBottom: 10 }}>
-                    <input
-                      type="text"
-                      className="form-input"
-                      style={{ fontSize: '0.82rem', padding: '7px 28px 7px 10px' }}
-                      placeholder="🔍 Cari nama kontak, nomor telepon, atau kategori..."
-                      value={contactSearchQuery}
-                      onChange={(e) => setContactSearchQuery(e.target.value)}
-                    />
-                    {contactSearchQuery && (
-                      <button
-                        type="button"
-                        onClick={() => setContactSearchQuery('')}
-                        style={{
-                          position: 'absolute',
-                          right: 8,
-                          top: '50%',
-                          transform: 'translateY(-50%)',
-                          background: 'none',
-                          border: 'none',
-                          color: 'var(--text-muted)',
-                          cursor: 'pointer',
-                          fontSize: '0.9rem',
-                        }}
-                      >
-                        ✕
-                      </button>
-                    )}
-                  </div>
-
-                  {/* Contact List */}
-                  {availableContacts.length === 0 ? (
-                    <div style={{ padding: '12px', textAlign: 'center', fontSize: '0.82rem', color: 'var(--text-muted)' }}>
-                      Memuat daftar kontak... Pastikan WhatsApp sudah terhubung di dashboard.
-                    </div>
-                  ) : filteredContacts.length === 0 ? (
-                    <div style={{ padding: '12px', textAlign: 'center', fontSize: '0.82rem', color: 'var(--text-muted)' }}>
-                      Tidak ada kontak yang cocok dengan &quot;{contactSearchQuery}&quot;
-                    </div>
-                  ) : (
-                    <div style={{ maxHeight: 220, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 6, paddingRight: 4 }}>
-                      {filteredContacts.map((c) => {
-                        const selected = isContactSelected(c.phone);
-                        const initial = (c.name || 'K').trim().charAt(0).toUpperCase();
-                        return (
-                          <div
-                            key={c.id || c.phone}
-                            onClick={() => toggleContactSelection({ name: c.name, phone: c.phone })}
-                            style={{
-                              display: 'flex',
-                              alignItems: 'center',
-                              gap: 10,
-                              padding: '7px 10px',
-                              borderRadius: 'var(--radius-sm)',
-                              background: selected ? 'rgba(0, 168, 132, 0.16)' : 'rgba(255, 255, 255, 0.03)',
-                              cursor: 'pointer',
-                              border: selected ? '1px solid var(--wa-emerald)' : '1px solid transparent',
-                              transition: 'all 0.15s ease',
-                            }}
-                          >
-                            <input
-                              type="checkbox"
-                              checked={selected}
-                              onChange={() => {}} // Handled by row onClick
-                              style={{ cursor: 'pointer' }}
-                            />
-                            <div
-                              style={{
-                                width: 28,
-                                height: 28,
-                                borderRadius: '50%',
-                                background: selected ? 'var(--wa-teal)' : 'rgba(255,255,255,0.1)',
-                                color: '#fff',
-                                display: 'flex',
-                                alignItems: 'center',
-                                justifyContent: 'center',
-                                fontSize: '0.8rem',
-                                fontWeight: 600,
-                                flexShrink: 0,
-                              }}
-                            >
-                              {initial}
-                            </div>
-                            <div style={{ flex: 1, minWidth: 0 }}>
-                              <div style={{ fontWeight: 600, fontSize: '0.85rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                                {c.name}
-                              </div>
-                              <div style={{ fontSize: '0.73rem', color: 'var(--text-dim)' }}>
-                                {c.phone}
-                              </div>
-                            </div>
-                            <span
-                              style={{
-                                fontSize: '0.68rem',
-                                padding: '2px 6px',
-                                borderRadius: 4,
-                                background: 'rgba(255, 255, 255, 0.06)',
-                                color: 'var(--text-muted)',
-                                flexShrink: 0,
-                              }}
-                            >
-                              {c.source}
-                            </span>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  )}
-                </div>
-              )}
-
+              {/* FITUR 2: GRUP WHATSAPP SELECTION WITH ADVANCED SEARCH */}
               {recipientType === 'wa_group' && (
                 <div className="form-group" style={{ background: 'var(--bg-input)', padding: 12, borderRadius: 'var(--radius-md)', border: '1px solid var(--border-subtle)' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-                    <label className="form-label" style={{ marginBottom: 0, fontWeight: 600, color: 'var(--wa-emerald)' }}>
+                  {/* Header Counter & Refresh */}
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8, flexWrap: 'wrap', gap: 6 }}>
+                    <div style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--wa-emerald)' }}>
                       Pilih Grup WhatsApp Tujuan ({selectedWaGroupIds.length} dipilih)
-                    </label>
+                    </div>
                     <button
                       type="button"
                       className="btn btn-secondary btn-sm"
@@ -890,13 +1121,116 @@ export default function ScheduleModal({ isOpen, onClose, onSuccess, initialFile,
                     </button>
                   </div>
 
+                  {/* Selected Chips Bar */}
+                  {selectedWaGroupIds.length > 0 && (
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginBottom: 8, maxHeight: 65, overflowY: 'auto', padding: 4, background: 'rgba(0,0,0,0.2)', borderRadius: 'var(--radius-sm)' }}>
+                      {selectedWaGroupIds.map((gid) => {
+                        const match = waGroups.find((g) => g.id === gid);
+                        return (
+                          <span
+                            key={gid}
+                            style={{
+                              background: 'rgba(0, 168, 132, 0.25)',
+                              border: '1px solid var(--wa-emerald)',
+                              color: '#fff',
+                              fontSize: '0.72rem',
+                              padding: '2px 8px',
+                              borderRadius: 12,
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: 4,
+                            }}
+                          >
+                            <span>{match ? match.name : gid.split('@')[0]}</span>
+                            <span
+                              style={{ cursor: 'pointer', fontWeight: 'bold', color: '#f87171' }}
+                              onClick={() => handleRemoveWaGroupChip(gid)}
+                            >
+                              &times;
+                            </span>
+                          </span>
+                        );
+                      })}
+                    </div>
+                  )}
+
+                  {/* Search Bar & Action Buttons (FITUR 2) */}
+                  <div style={{ display: 'flex', gap: 6, marginBottom: 8, flexWrap: 'wrap' }}>
+                    <div style={{ flex: 1, minWidth: 200, position: 'relative' }}>
+                      <input
+                        type="text"
+                        className="form-input"
+                        style={{ fontSize: '0.8rem', padding: '6px 26px 6px 10px' }}
+                        placeholder="🔍 Cari nama grup atau ID..."
+                        value={waGroupSearchQuery}
+                        onChange={(e) => setWaGroupSearchQuery(e.target.value)}
+                      />
+                      {waGroupSearchQuery && (
+                        <button
+                          type="button"
+                          onClick={() => setWaGroupSearchQuery('')}
+                          style={{
+                            position: 'absolute',
+                            right: 8,
+                            top: '50%',
+                            transform: 'translateY(-50%)',
+                            background: 'none',
+                            border: 'none',
+                            color: 'var(--text-muted)',
+                            cursor: 'pointer',
+                          }}
+                        >
+                          ✕
+                        </button>
+                      )}
+                    </div>
+
+                    <button
+                      type="button"
+                      className="btn btn-secondary btn-sm"
+                      style={{ fontSize: '0.72rem', padding: '4px 8px' }}
+                      onClick={handleSelectAllFilteredWaGroups}
+                    >
+                      ✓ Pilih Semua Hasil ({filteredWaGroups.length})
+                    </button>
+
+                    {selectedWaGroupIds.length > 0 && (
+                      <button
+                        type="button"
+                        className="btn btn-secondary btn-sm"
+                        style={{ fontSize: '0.72rem', padding: '4px 8px', color: 'var(--error)' }}
+                        onClick={handleClearAllWaGroups}
+                      >
+                        ✕ Hapus Pilihan
+                      </button>
+                    )}
+                  </div>
+
+                  {/* Quick Filter Toggle & Counter */}
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8, fontSize: '0.75rem', color: 'var(--text-dim)' }}>
+                    <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}>
+                      <input
+                        type="checkbox"
+                        checked={showSelectedOnly}
+                        onChange={(e) => setShowSelectedOnly(e.target.checked)}
+                      />
+                      <span>Tampilkan yang dipilih saja</span>
+                    </label>
+                    <span>Menampilkan {filteredWaGroups.length} dari {waGroups.length} grup</span>
+                  </div>
+
+                  {/* Group List */}
                   {waGroups.length === 0 ? (
                     <div style={{ padding: '10px 0', fontSize: '0.82rem', color: 'var(--text-muted)' }}>
                       Belum ada grup terdeteksi. Pastikan akun WhatsApp Anda sudah terhubung di dashboard, lalu klik <strong>Sinkronkan Grup</strong> di atas.
                     </div>
+                  ) : filteredWaGroups.length === 0 ? (
+                    <div style={{ padding: '12px 0', textAlign: 'center', fontSize: '0.82rem', color: 'var(--text-muted)' }}>
+                      Tidak ada grup yang cocok dengan &quot;{debouncedWaGroupSearch}&quot;
+                    </div>
                   ) : (
-                    <div style={{ maxHeight: 160, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 6 }}>
-                      {waGroups.map((g) => {
+                    <div style={{ maxHeight: 180, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 6 }}>
+                      {filteredWaGroups.map((g) => {
                         const isChecked = selectedWaGroupIds.includes(g.id);
                         return (
                           <label
@@ -926,10 +1260,10 @@ export default function ScheduleModal({ isOpen, onClose, onSuccess, initialFile,
                             />
                             <div style={{ flex: 1, minWidth: 0 }}>
                               <div style={{ fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                                {g.name}
+                                {renderHighlightedText(g.name, debouncedWaGroupSearch)}
                               </div>
                               <div style={{ fontSize: '0.72rem', color: 'var(--text-dim)' }}>
-                                {g.participantsCount} anggota &bull; ID: {g.id.split('@')[0]}
+                                {g.participantsCount} anggota &bull; ID: {renderHighlightedText(g.id.split('@')[0], debouncedWaGroupSearch)}
                               </div>
                             </div>
                           </label>
@@ -940,7 +1274,7 @@ export default function ScheduleModal({ isOpen, onClose, onSuccess, initialFile,
 
                   <div style={{ marginTop: 10, paddingTop: 8, borderTop: '1px solid var(--border-subtle)' }}>
                     <label className="form-label" style={{ fontSize: '0.78rem' }}>
-                      Atau Masukkan Group ID Manual (Opsional, contoh: 120363025283921829@g.us):
+                      Atau Masukkan Group ID Manual:
                     </label>
                     <input
                       type="text"
@@ -954,69 +1288,76 @@ export default function ScheduleModal({ isOpen, onClose, onSuccess, initialFile,
                 </div>
               )}
 
-              {recipientType === 'group' && (
-                <div className="form-group">
-                  <label className="form-label">Pilih Kategori Kontak Buku Telepon</label>
-                  {groups.length === 0 ? (
-                    <div style={{ padding: 10, borderRadius: 'var(--radius-sm)', background: 'rgba(234, 179, 8, 0.1)', border: '1px solid rgba(234, 179, 8, 0.3)', fontSize: '0.82rem', color: '#facc15' }}>
-                      ⚠️ Belum ada kategori di buku kontak internal.
-                      <div style={{ marginTop: 6 }}>
-                        Jika ingin menjadwalkan ke <strong>Grup WhatsApp</strong>, pilih opsi <strong>👥 Grup WhatsApp</strong> di dropdown atas.
-                      </div>
+              {recipientType === 'contacts' && (
+                <div className="form-group" style={{ background: 'var(--bg-input)', padding: 12, borderRadius: 'var(--radius-md)', border: '1px solid var(--border-subtle)' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10, flexWrap: 'wrap', gap: 8 }}>
+                    <span style={{ fontWeight: 600, fontSize: '0.88rem', color: 'var(--wa-emerald)' }}>
+                      Pilih Nama Kontak ({selectedContacts.length} dipilih)
+                    </span>
+                    <div style={{ display: 'flex', gap: 6 }}>
                       <button
                         type="button"
                         className="btn btn-secondary btn-sm"
-                        style={{ marginTop: 8 }}
-                        onClick={() => setRecipientType('wa_group')}
+                        style={{ padding: '3px 8px', fontSize: '0.74rem' }}
+                        onClick={handleSelectAllFilteredContacts}
                       >
-                        Beralih ke 👥 Grup WhatsApp
+                        ✓ Pilih Semua ({filteredContacts.length})
                       </button>
+                      {selectedContacts.length > 0 && (
+                        <button
+                          type="button"
+                          className="btn btn-secondary btn-sm"
+                          style={{ padding: '3px 8px', fontSize: '0.74rem', color: 'var(--error)' }}
+                          onClick={handleClearAllContacts}
+                        >
+                          ✕ Batal Semua
+                        </button>
+                      )}
                     </div>
-                  ) : (
-                    <select
-                      className="form-select"
-                      value={selectedGroup}
-                      onChange={(e) => setSelectedGroup(e.target.value)}
-                    >
-                      {groups.map((g) => (
-                        <option key={g} value={g}>
-                          {g} ({contacts.filter((c) => c.group === g).length} kontak)
-                        </option>
-                      ))}
-                    </select>
-                  )}
+                  </div>
+
+                  <div style={{ position: 'relative', marginBottom: 10 }}>
+                    <input
+                      type="text"
+                      className="form-input"
+                      style={{ fontSize: '0.82rem', padding: '7px 28px 7px 10px' }}
+                      placeholder="🔍 Cari nama kontak, nomor telepon, atau kategori..."
+                      value={contactSearchQuery}
+                      onChange={(e) => setContactSearchQuery(e.target.value)}
+                    />
+                  </div>
+
+                  <div style={{ maxHeight: 180, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 6 }}>
+                    {filteredContacts.map((c) => {
+                      const selected = isContactSelected(c.phone);
+                      return (
+                        <div
+                          key={c.id || c.phone}
+                          onClick={() => toggleContactSelection({ name: c.name, phone: c.phone })}
+                          style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: 10,
+                            padding: '6px 10px',
+                            borderRadius: 'var(--radius-sm)',
+                            background: selected ? 'rgba(0, 168, 132, 0.16)' : 'rgba(255, 255, 255, 0.03)',
+                            cursor: 'pointer',
+                            border: selected ? '1px solid var(--wa-emerald)' : '1px solid transparent',
+                          }}
+                        >
+                          <input type="checkbox" checked={selected} readOnly />
+                          <div style={{ flex: 1, minWidth: 0 }}>
+                            <div style={{ fontWeight: 600, fontSize: '0.85rem' }}>{c.name}</div>
+                            <div style={{ fontSize: '0.73rem', color: 'var(--text-dim)' }}>{c.phone}</div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
                 </div>
               )}
 
-              {recipientType === 'custom' && (
-                <div className="form-group">
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
-                    <label className="form-label" style={{ marginBottom: 0 }}>
-                      Daftar Nomor WhatsApp (Satu nomor per baris)
-                    </label>
-                    <button
-                      type="button"
-                      className="btn btn-secondary btn-sm"
-                      style={{ padding: '2px 8px', fontSize: '0.72rem', color: 'var(--wa-emerald)' }}
-                      onClick={() => setRecipientType('contacts')}
-                    >
-                      👤 Pilih dari Nama Kontak
-                    </button>
-                  </div>
-                  <textarea
-                    className="form-textarea"
-                    placeholder="081234567890&#10;089876543210"
-                    value={customPhones}
-                    onChange={(e) => setCustomPhones(e.target.value)}
-                    rows={3}
-                  />
-                  <div style={{ fontSize: '0.74rem', color: 'var(--text-muted)', marginTop: 4 }}>
-                    💡 Tips: Lebih mudah memilih nama kontak langsung? Klik tombol <strong>👤 Pilih dari Nama Kontak</strong> di atas.
-                  </div>
-                </div>
-              )}
-
-              {/* Anti-Ban Delay Config */}
+              {/* Anti-Ban Config */}
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }} className="form-group">
                 <div>
                   <label className="form-label">Jeda Minimum (detik)</label>
@@ -1043,7 +1384,7 @@ export default function ScheduleModal({ isOpen, onClose, onSuccess, initialFile,
               </div>
             </div>
 
-            {/* RIGHT COLUMN: MESSAGE EDITOR & LIVE PREVIEW */}
+            {/* RIGHT COLUMN: MESSAGE EDITOR & LIVE SIMULATOR PREVIEW */}
             <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
               {/* Message Editor */}
               <div className="form-group" style={{ marginBottom: 0 }}>
@@ -1058,16 +1399,18 @@ export default function ScheduleModal({ isOpen, onClose, onSuccess, initialFile,
                   <span style={{ fontSize: '0.75rem', color: 'var(--text-dim)', alignSelf: 'center' }}>
                     Variabel:
                   </span>
-                  {['nama', 'jadwal', 'waktu', 'tanggal', 'kegiatan'].map((varName) => (
-                    <button
-                      key={varName}
-                      type="button"
-                      className="chip"
-                      onClick={() => insertVariable(varName)}
-                    >
-                      +{`{${varName}}`}
-                    </button>
-                  ))}
+                  {['nama', 'jadwal', 'waktu', 'tanggal', 'kegiatan', 'petugas', 'lokasi', 'keterangan'].map(
+                    (varName) => (
+                      <button
+                        key={varName}
+                        type="button"
+                        className="chip"
+                        onClick={() => insertVariable(varName)}
+                      >
+                        +{`{${varName}}`}
+                      </button>
+                    )
+                  )}
                 </div>
 
                 <textarea
@@ -1081,13 +1424,31 @@ export default function ScheduleModal({ isOpen, onClose, onSuccess, initialFile,
                 />
               </div>
 
-              {/* WhatsApp Live Simulator Preview */}
+              {/* FITUR 1: WHATSAPP LIVE SIMULATOR PREVIEW WITH DATE PICKER */}
               <div>
-                <label className="form-label">Simulasi Tampilan di WhatsApp Penerima:</label>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+                  <label className="form-label" style={{ marginBottom: 0 }}>
+                    Simulasi Tampilan di WhatsApp Penerima:
+                  </label>
+
+                  {sendMode === 'schedule_text' && (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                      <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>Tanggal Pratinjau:</span>
+                      <input
+                        type="date"
+                        className="form-input"
+                        style={{ fontSize: '0.72rem', padding: '2px 6px', width: 125 }}
+                        value={previewDate}
+                        onChange={(e) => setPreviewDate(e.target.value)}
+                      />
+                    </div>
+                  )}
+                </div>
+
                 <div className="wa-chat-preview">
                   <div className="chat-bubble">
-                    {/* Simulated Attached File */}
-                    {attachedFile && (
+                    {/* Simulated Attached File (Only shown in attachment mode) */}
+                    {sendMode === 'attachment' && attachedFile && (
                       <div className="chat-bubble-attachment">
                         <div className="attachment-icon">
                           {attachedFile.mimeType.includes('pdf') ? '📕' : attachedFile.mimeType.includes('image') ? '🖼️' : '📄'}
@@ -1105,7 +1466,7 @@ export default function ScheduleModal({ isOpen, onClose, onSuccess, initialFile,
                     )}
 
                     {/* Text content */}
-                    <div>{previewText}</div>
+                    <div style={{ whiteSpace: 'pre-line' }}>{previewText}</div>
 
                     {/* Metadata */}
                     <div className="chat-bubble-meta">

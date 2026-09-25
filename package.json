@@ -12,13 +12,15 @@
   },
   "dependencies": {
     "@whiskeysockets/baileys": "^6.7.19",
+    "mammoth": "^1.12.3",
     "next": "^15.1.0",
     "node-cron": "^3.0.3",
     "pino": "^9.6.0",
     "qrcode": "^1.5.4",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
-    "uuid": "^11.0.3"
+    "uuid": "^11.0.3",
+    "xlsx": "^0.18.5"
   },
   "devDependencies": {
     "@types/node": "^22.10.2",

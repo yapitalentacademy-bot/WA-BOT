@@ -51,6 +51,37 @@ export interface WhatsAppGroupItem {
 }
 
 export type ScheduleRepeatType = 'once' | 'daily' | 'weekly';
+export type ScheduleSendMode = 'attachment' | 'schedule_text';
+export type ScheduleScope = 'today' | 'tomorrow' | 'week';
+export type NoRowAction = 'skip' | 'fallback_text';
+
+export interface ScheduleRow {
+  id: string;
+  tanggal?: string; // e.g. "2026-09-26" or "26/09/2026" or "26 September 2026"
+  hari?: string; // e.g. "Sabtu" or "Saturday"
+  waktu?: string; // e.g. "08:00" or "08:00 - 10:00"
+  kegiatan?: string; // e.g. "Rapat Pleno"
+  petugas?: string; // e.g. "Ustadz Ahmad"
+  lokasi?: string; // e.g. "Aula Utama"
+  keterangan?: string; // e.g. "Membawa laptop"
+  rawData?: Record<string, string>;
+}
+
+export interface ColumnMapping {
+  tanggalKey?: string;
+  waktuKey?: string;
+  kegiatanKey?: string;
+  petugasKey?: string;
+  lokasiKey?: string;
+  keteranganKey?: string;
+}
+
+export interface ExtractedScheduleData {
+  rows: ScheduleRow[];
+  columns: string[];
+  columnMapping: ColumnMapping;
+  detectedDateRange?: string; // e.g. "1 Sep 2026 - 30 Sep 2026"
+}
 
 export interface BroadcastSchedule {
   id: string;
@@ -58,6 +89,12 @@ export interface BroadcastSchedule {
   message: string;
   templateId?: string;
   attachedFile?: AttachedFile | null;
+  sendMode?: ScheduleSendMode; // 'attachment' (legacy) or 'schedule_text' (new)
+  extractedSchedule?: ExtractedScheduleData | null;
+  scheduleScope?: ScheduleScope; // 'today' | 'tomorrow' | 'week'
+  noRowAction?: NoRowAction; // 'skip' | 'fallback_text'
+  fallbackText?: string;
+  isExpired?: boolean; // Set to true if all dates in file have passed
   recipients: {
     type: 'all' | 'group' | 'custom' | 'wa_group' | 'contacts';
     targetGroup?: string;
