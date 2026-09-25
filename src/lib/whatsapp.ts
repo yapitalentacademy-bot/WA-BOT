@@ -272,18 +272,26 @@ export async function initWhatsApp(accountId = 'acc_1', force = false): Promise<
     const storeContact = (c: any) => {
       if (!c || !c.id) return;
       if (c.id.endsWith('@g.us') || c.id.endsWith('@broadcast')) return;
-      const phone = c.id.split('@')[0].split(':')[0];
-      const name = c.name || c.notify || c.verifiedName || phone;
-      const item = { id: c.id, phone, name };
-      if (c.name || c.notify || c.verifiedName) {
-        acc.contactsMap.set(c.id, item);
-        acc.contactsMap.set(phone, item);
-        acc.contactsMap.set(`${phone}@s.whatsapp.net`, item);
-        if (c.lid) acc.contactsMap.set(c.lid, item);
-      } else if (!acc.contactsMap.has(c.id)) {
-        acc.contactsMap.set(c.id, item);
-        acc.contactsMap.set(phone, item);
+
+      const jid = c.id;
+      const phoneRaw = jid.split('@')[0].split(':')[0];
+      const pn = c.phoneNumber || c.pn;
+      const cleanPhone = pn ? pn.split('@')[0].split(':')[0] : phoneRaw;
+
+      const existing = acc.contactsMap.get(jid) || acc.contactsMap.get(cleanPhone) || acc.contactsMap.get(phoneRaw);
+
+      const namaHp = (c.name && c.name !== cleanPhone && c.name !== jid) ? c.name : existing?.name;
+      const notifyName = (c.notify || c.verifiedName) && (c.notify || c.verifiedName) !== cleanPhone ? (c.notify || c.verifiedName) : undefined;
+      const finalName = namaHp || notifyName || existing?.name || cleanPhone;
+
+      const item = { id: jid, phone: cleanPhone, name: finalName };
+
+      acc.contactsMap.set(jid, item);
+      if (cleanPhone) {
+        acc.contactsMap.set(cleanPhone, item);
+        acc.contactsMap.set(`${cleanPhone}@s.whatsapp.net`, item);
       }
+      if (c.lid) acc.contactsMap.set(c.lid, item);
     };
 
     (sock.ev as any).on('contacts.set', ({ contacts }: any) => {
@@ -303,8 +311,22 @@ export async function initWhatsApp(accountId = 'acc_1', force = false): Promise<
         for (const u of updates) {
           if (u.id) {
             const existing = acc.contactsMap.get(u.id) || acc.contactsMap.get(u.id.split('@')[0]);
-            const newName = u.name || u.notify || u.verifiedName || existing?.name;
-            storeContact({ ...existing, ...u, name: newName });
+            storeContact({ ...existing, ...u });
+          }
+        }
+      }
+    });
+
+    sock.ev.on('messages.upsert', ({ messages }: any) => {
+      if (!Array.isArray(messages)) return;
+      for (const m of messages) {
+        if (m.key?.fromMe) continue; // Skip own pushName
+        const jid = m.key?.participant || m.key?.remoteJid;
+        if (jid && m.pushName) {
+          const phone = jid.split('@')[0].split(':')[0];
+          const existing = acc.contactsMap.get(jid) || acc.contactsMap.get(phone);
+          if (!existing || existing.name === phone || existing.name.startsWith('Peserta ') || existing.name.startsWith('Anggota ')) {
+            storeContact({ id: jid, notify: m.pushName });
           }
         }
       }
