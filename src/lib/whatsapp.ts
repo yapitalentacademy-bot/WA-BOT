@@ -243,8 +243,16 @@ export async function initWhatsApp(accountId = 'acc_1', force = false): Promise<
     } = baileys;
 
     const { state: authState, saveCreds } = await useMultiFileAuthState(acc.authDir);
-    const { version, isLatest } = await fetchLatestBaileysVersion();
-    console.log(`[MULTI-WA] [${acc.label}] Baileys v${version.join('.')}, isLatest: ${isLatest}`);
+    let version: [number, number, number] = [2, 3000, 1015901307];
+    try {
+      const latest = await fetchLatestBaileysVersion();
+      if (latest && latest.version) {
+        version = latest.version;
+      }
+      console.log(`[MULTI-WA] [${acc.label}] Baileys v${version.join('.')}, isLatest: ${latest?.isLatest}`);
+    } catch (e) {
+      console.warn(`[MULTI-WA] [${acc.label}] Gagal mengambil versi Baileys terbaru, menggunakan fallback version:`, e);
+    }
 
     const logger = pino({ level: 'silent' });
 
