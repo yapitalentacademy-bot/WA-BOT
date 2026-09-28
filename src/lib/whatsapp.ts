@@ -10,6 +10,7 @@ export const MAX_WA_ACCOUNTS = 5;
 
 // Anti-Looping: Track IDs of messages sent by bot to avoid self-response loops
 const sentBotMsgIds = new Set<string>();
+const recentSentBotTexts = new Map<string, number>();
 
 export function trackSentBotMsgId(msgId?: string | null) {
   if (!msgId) return;
@@ -18,6 +19,35 @@ export function trackSentBotMsgId(msgId?: string | null) {
     const first = sentBotMsgIds.values().next().value;
     if (first) sentBotMsgIds.delete(first);
   }
+}
+
+export function trackSentBotText(text?: string | null) {
+  if (!text) return;
+  const key = text.trim();
+  if (!key) return;
+  recentSentBotTexts.set(key, Date.now());
+  const now = Date.now();
+  for (const [k, time] of recentSentBotTexts.entries()) {
+    if (now - time > 30000) recentSentBotTexts.delete(k);
+  }
+}
+
+export function isBotSentText(text?: string | null): boolean {
+  if (!text) return false;
+  const key = text.trim();
+  if (!key) return false;
+  const time = recentSentBotTexts.get(key);
+  if (time && Date.now() - time < 30000) {
+    return true;
+  }
+  return false;
+}
+
+export function normalizePhone(p?: string | null): string {
+  if (!p) return '';
+  let clean = p.replace(/\D/g, '');
+  if (clean.startsWith('0')) clean = '62' + clean.slice(1);
+  return clean;
 }
 
 export interface WhatsAppAccountState {
@@ -437,8 +467,23 @@ export async function initWhatsApp(accountId = 'acc_1', force = false): Promise<
       for (const m of messages) {
         const msgId = m.key?.id;
 
-        // 1. Anti-Looping: Abaikan pesan yang dikirim oleh bot itu sendiri
+        // 1. Anti-Looping: Abaikan pesan jika ID pesan berasal dari balasan bot itu sendiri
         if (msgId && sentBotMsgIds.has(msgId)) continue;
+
+        // Ambil isi teks perintah
+        const messageText =
+          m.message?.conversation ||
+          m.message?.extendedTextMessage?.text ||
+          m.message?.imageMessage?.caption ||
+          m.message?.documentMessage?.caption ||
+          m.message?.ephemeralMessage?.message?.conversation ||
+          m.message?.ephemeralMessage?.message?.extendedTextMessage?.text ||
+          '';
+
+        // 2. Anti-Looping Teks: Abaikan pesan yang teksnya persis sama dengan balasan bot baru-baru ini
+        if (messageText && isBotSentText(messageText)) {
+          continue;
+        }
 
         // Update kontak map dari pushName untuk pesan masuk
         if (!m.key?.fromMe) {
@@ -448,33 +493,30 @@ export async function initWhatsApp(accountId = 'acc_1', force = false): Promise<
           }
         }
 
-        // 2. KEAMANAN SANGAT KETAT:
+        // 3. KEAMANAN SANGAT KETAT:
         // Perintah HANYA diterima dari:
-        // a) Self-Chat akun yang ditautkan ( remoteJid == userJid )
+        // a) Self-Chat akun yang ditautkan ( remoteJid == userJid / phone match )
         // b) Nomor Admin di whitelist (env ADMIN_NUMBERS)
         const remoteJid = m.key?.remoteJid || '';
         const userJid = sock.user?.id || '';
-        const cleanUserPhone = userJid.split(':')[0].split('@')[0];
-        const senderPhone = remoteJid.split('@')[0].split(':')[0];
+        const myPhone = normalizePhone(acc.userInfo?.phone || userJid);
+        const senderPhone = normalizePhone(remoteJid || m.key?.participant);
 
         const adminNumbersEnv = process.env.ADMIN_NUMBERS || '';
-        const adminNumbers = adminNumbersEnv.split(',').map((n) => n.trim().replace(/\D/g, '')).filter(Boolean);
+        const adminNumbers = adminNumbersEnv.split(',').map((n) => normalizePhone(n)).filter(Boolean);
 
-        const isSelfChat = remoteJid === userJid || senderPhone === cleanUserPhone || (m.key?.fromMe && !remoteJid.endsWith('@g.us'));
+        const isSelfChat =
+          (myPhone !== '' && (myPhone === senderPhone || remoteJid.includes(myPhone))) ||
+          remoteJid === userJid ||
+          remoteJid === acc.userInfo?.id ||
+          (m.key?.fromMe && !remoteJid.endsWith('@g.us'));
+
         const isAdmin = adminNumbers.includes(senderPhone);
 
         // KETAT: Abaikan jika berasal dari grup WA (@g.us) atau nomor lain yang bukan Admin / Self-chat
         if (remoteJid.endsWith('@g.us') || (!isSelfChat && !isAdmin)) {
           continue;
         }
-
-        // Ambil isi teks perintah
-        const messageText =
-          m.message?.conversation ||
-          m.message?.extendedTextMessage?.text ||
-          m.message?.imageMessage?.caption ||
-          m.message?.documentMessage?.caption ||
-          '';
 
         let attachedFileFromMsg: AttachedFile | undefined = undefined;
         const docMsg = m.message?.documentMessage || m.message?.imageMessage;
@@ -518,14 +560,15 @@ export async function initWhatsApp(accountId = 'acc_1', force = false): Promise<
           );
 
           if (replyText) {
+            trackSentBotText(replyText);
             const res = await sock.sendMessage(remoteJid, { text: replyText });
             trackSentBotMsgId(res?.key?.id);
           }
         } catch (err: any) {
           console.error(`[BOT COMMAND ERROR] [${acc.label}]:`, err);
-          const res = await sock.sendMessage(remoteJid, {
-            text: `⚡ *Share Otomatis*\n❌ Gagal memproses perintah: ${err?.message || 'Error internal'}`,
-          });
+          const errText = `⚡ *Share Otomatis*\n❌ Gagal memproses perintah: ${err?.message || 'Error internal'}`;
+          trackSentBotText(errText);
+          const res = await sock.sendMessage(remoteJid, { text: errText });
           trackSentBotMsgId(res?.key?.id);
         }
       }

@@ -37,13 +37,11 @@ export const BotCommandHandler = {
       }
     }
 
-    // 3. PARSE COMMANDS DENGAN PREFIX "/" ATAU "#"
-    if (!rawText.startsWith('/') && !rawText.startsWith('#')) {
-      // Jika bukan command dan tidak dalam wizard, tampilkan petunjuk singkat
-      return '⚡ *Share Otomatis*\nKetik */menu* untuk menampilkan daftar perintah bot.';
+    // 3. PARSE COMMANDS DENGAN PREFIX "/" ATAU "#" ATAU KATA KUNCI LANGSUNG
+    let commandStr = rawText;
+    if (commandStr.startsWith('/') || commandStr.startsWith('#')) {
+      commandStr = commandStr.substring(1).trim();
     }
-
-    const commandStr = rawText.substring(1).trim(); // Hapus / atau #
     const commandLower = commandStr.toLowerCase();
 
     // MENU
