@@ -47,7 +47,12 @@ function writeJsonFile<T>(filename: string, data: T): void {
 export const Storage = {
   // CONTACTS
   getContacts(): Contact[] {
-    return readJsonFile<Contact[]>('contacts.json', []);
+    const raw = readJsonFile<Contact[]>('contacts.json', []);
+    return raw.filter((c) => {
+      if (!c.phone) return false;
+      const clean = c.phone.replace(/\D/g, '');
+      return clean.length >= 8 && clean.length <= 13;
+    });
   },
   saveContacts(contacts: Contact[]): void {
     writeJsonFile('contacts.json', contacts);

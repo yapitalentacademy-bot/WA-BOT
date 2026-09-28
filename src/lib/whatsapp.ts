@@ -211,11 +211,16 @@ export function formatToWhatsAppJid(target: string): string {
 }
 
 export function cleanPhoneNumber(phone: string): string {
+  if (!phone) return '';
   let clean = phone.replace(/\D/g, '');
   if (clean.startsWith('0')) {
     clean = '62' + clean.slice(1);
   } else if (clean.startsWith('8')) {
     clean = '62' + clean;
+  }
+  // Validate real phone number digit length (8 to 13 digits)
+  if (clean.length < 8 || clean.length > 13) {
+    return '';
   }
   return clean;
 }
@@ -805,33 +810,32 @@ function resolveParticipantInfo(acc: WhatsAppAccountState, p: any, groupName: st
   const pnJid = p.pn || p.phoneNumber || (rawId.endsWith('@s.whatsapp.net') ? rawId : '');
   const lidJid = p.lid || (rawId.endsWith('@lid') ? rawId : '');
 
-  let phone = '';
+  let validPhone = '';
   if (pnJid) {
-    phone = pnJid.split('@')[0].split(':')[0];
+    validPhone = cleanPhoneNumber(pnJid.split('@')[0].split(':')[0]);
   } else if (rawId && !rawId.endsWith('@lid')) {
-    phone = rawId.split('@')[0].split(':')[0];
+    validPhone = cleanPhoneNumber(rawId.split('@')[0].split(':')[0]);
   }
 
-  const isLid = !phone || phone.length >= 14 || rawId.endsWith('@lid');
-  const targetPhone = phone || rawId.split('@')[0].split(':')[0];
+  const isLid = !validPhone;
 
   // Look up in contactsMap
   const known =
+    (validPhone ? acc.contactsMap.get(validPhone) : null) ||
+    (validPhone ? acc.contactsMap.get(`${validPhone}@s.whatsapp.net`) : null) ||
     (rawId ? acc.contactsMap.get(rawId) : null) ||
-    (lidJid ? acc.contactsMap.get(lidJid) : null) ||
-    (targetPhone ? acc.contactsMap.get(targetPhone) : null) ||
-    (targetPhone ? acc.contactsMap.get(`${targetPhone}@s.whatsapp.net`) : null);
+    (lidJid ? acc.contactsMap.get(lidJid) : null);
 
   let name = '';
-  if (known?.name && known.name !== targetPhone && known.name !== rawId) {
+  if (known?.name && known.name !== validPhone && known.name !== rawId && !known.name.startsWith('+15') && !known.name.startsWith('+20') && !known.name.startsWith('+25') && !known.name.startsWith('+27')) {
     name = known.name;
   } else if (p.name || p.notify || p.verifiedName) {
     name = p.name || p.notify || p.verifiedName;
   }
 
-  const destinationId = rawId || (phone ? `${phone}@s.whatsapp.net` : '');
-  const displayPhone = targetPhone;
-  const finalName = name || (isLid ? `Peserta ${groupName} (ID: ${displayPhone.slice(-4)})` : `Peserta ${groupName} (+${displayPhone})`);
+  const destinationId = validPhone ? `${validPhone}@s.whatsapp.net` : (rawId || lidJid);
+  const displayPhone = validPhone; // Empty string if raw LID!
+  const finalName = name || (isLid ? `Peserta ${groupName} (ID: ${rawId.split('@')[0].slice(-4)})` : `+${validPhone}`);
 
   return {
     id: destinationId,
@@ -854,12 +858,13 @@ export async function getWhatsAppContacts(preferredAccountId?: string): Promise<
   for (const acc of targets) {
     // 1. Kontak dari cache memori/disk akun ini
     for (const [_, c] of acc.contactsMap.entries()) {
-      if (c.phone && !seenPhones.has(c.phone)) {
-        seenPhones.add(c.phone);
-        const displayName = c.name && c.name !== c.phone ? c.name : `+${c.phone}`;
+      const validPhone = c.phone ? cleanPhoneNumber(c.phone) : '';
+      if (validPhone && !seenPhones.has(validPhone)) {
+        seenPhones.add(validPhone);
+        const displayName = c.name && c.name !== validPhone && !c.name.startsWith('+15') && !c.name.startsWith('+20') && !c.name.startsWith('+25') ? c.name : `+${validPhone}`;
         results.push({
-          id: c.id || `${c.phone}@s.whatsapp.net`,
-          phone: c.phone,
+          id: c.id || `${validPhone}@s.whatsapp.net`,
+          phone: validPhone,
           name: displayName,
           source: `${acc.label} (Kontak WA)`,
         });
@@ -875,7 +880,7 @@ export async function getWhatsAppContacts(preferredAccountId?: string): Promise<
           if (Array.isArray(g.participants)) {
             for (const p of g.participants) {
               const info = resolveParticipantInfo(acc, p, groupName);
-              if (info.phone && !seenPhones.has(info.phone)) {
+              if (info.phone && info.phone.length >= 8 && info.phone.length <= 13 && !seenPhones.has(info.phone)) {
                 seenPhones.add(info.phone);
                 results.push({
                   id: info.id,
