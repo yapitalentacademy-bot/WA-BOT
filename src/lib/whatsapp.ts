@@ -4,7 +4,6 @@ import QRCode from 'qrcode';
 import pino from 'pino';
 import { WhatsAppStatus, WhatsAppUserInfo, WhatsAppAccountInfo, AttachedFile } from '@/types';
 import { Storage } from './storage';
-import { BotCommandHandler } from './botCommands';
 
 export const MAX_WA_ACCOUNTS = 5;
 
@@ -470,111 +469,12 @@ export async function initWhatsApp(accountId = 'acc_1', force = false): Promise<
     sock.ev.on('messages.upsert', async ({ messages }: any) => {
       if (!Array.isArray(messages)) return;
       for (const m of messages) {
-        const msgId = m.key?.id;
-
-        // 1. Anti-Looping: Abaikan pesan jika ID pesan berasal dari balasan bot itu sendiri
-        if (msgId && sentBotMsgIds.has(msgId)) continue;
-
-        // Ambil isi teks perintah
-        const messageText =
-          m.message?.conversation ||
-          m.message?.extendedTextMessage?.text ||
-          m.message?.imageMessage?.caption ||
-          m.message?.documentMessage?.caption ||
-          m.message?.ephemeralMessage?.message?.conversation ||
-          m.message?.ephemeralMessage?.message?.extendedTextMessage?.text ||
-          '';
-
-        // 2. Anti-Looping Teks: Abaikan pesan yang teksnya persis sama dengan balasan bot baru-baru ini
-        if (messageText && isBotSentText(messageText)) {
-          continue;
-        }
-
         // Update kontak map dari pushName untuk pesan masuk
         if (!m.key?.fromMe) {
           const jid = m.key?.participant || m.key?.remoteJid;
           if (jid && m.pushName) {
             storeContact({ id: jid, pushName: m.pushName }, 'push');
           }
-        }
-
-        // 3. KEAMANAN SANGAT KETAT:
-        // Perintah HANYA diterima dari:
-        // a) Self-Chat akun yang ditautkan ( remoteJid == userJid / phone match )
-        // b) Nomor Admin di whitelist (env ADMIN_NUMBERS)
-        const remoteJid = m.key?.remoteJid || '';
-        const userJid = sock.user?.id || '';
-        const myPhone = normalizePhone(acc.userInfo?.phone || userJid);
-        const senderPhone = normalizePhone(remoteJid || m.key?.participant);
-
-        const adminNumbersEnv = process.env.ADMIN_NUMBERS || '';
-        const adminNumbers = adminNumbersEnv.split(',').map((n) => normalizePhone(n)).filter(Boolean);
-
-        const isSelfChat =
-          (myPhone !== '' && (myPhone === senderPhone || remoteJid.includes(myPhone))) ||
-          remoteJid === userJid ||
-          remoteJid === acc.userInfo?.id ||
-          (m.key?.fromMe && !remoteJid.endsWith('@g.us'));
-
-        const isAdmin = adminNumbers.includes(senderPhone);
-
-        // KETAT: Abaikan jika berasal dari grup WA (@g.us) atau nomor lain yang bukan Admin / Self-chat
-        if (remoteJid.endsWith('@g.us') || (!isSelfChat && !isAdmin)) {
-          continue;
-        }
-
-        let attachedFileFromMsg: AttachedFile | undefined = undefined;
-        const docMsg = m.message?.documentMessage || m.message?.imageMessage;
-
-        if (docMsg) {
-          try {
-            const buffer = await baileys.downloadMediaMessage(m, 'buffer', {});
-            const fileName = docMsg.fileName || `file_${Date.now()}.${docMsg.mimetype?.split('/')[1] || 'bin'}`;
-            const uploadDir = path.join(process.cwd(), 'data', 'uploads');
-            if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir, { recursive: true });
-
-            const localPath = path.join(uploadDir, `${Date.now()}_${fileName}`);
-            fs.writeFileSync(localPath, buffer);
-
-            const fileUrl = `/uploads/${path.basename(localPath)}`;
-            attachedFileFromMsg = {
-              id: `file-${Date.now()}`,
-              name: fileName,
-              originalName: fileName,
-              mimeType: docMsg.mimetype || 'application/octet-stream',
-              size: buffer.length,
-              url: fileUrl,
-              localPath,
-              uploadedAt: new Date().toISOString(),
-            };
-            Storage.addFile(attachedFileFromMsg);
-          } catch (err) {
-            console.error(`[MULTI-WA] [${acc.label}] Gagal mengunduh media dari self-chat:`, err);
-          }
-        }
-
-        if (!messageText.trim() && !attachedFileFromMsg) continue;
-
-        // Jalankan handler perintah bot
-        try {
-          const replyText = await BotCommandHandler.handleCommand(
-            acc.id,
-            remoteJid,
-            messageText,
-            attachedFileFromMsg
-          );
-
-          if (replyText) {
-            trackSentBotText(replyText);
-            const res = await sock.sendMessage(remoteJid, { text: replyText });
-            trackSentBotMsgId(res?.key?.id);
-          }
-        } catch (err: any) {
-          console.error(`[BOT COMMAND ERROR] [${acc.label}]:`, err);
-          const errText = `⚡ *Share Otomatis*\n❌ Gagal memproses perintah: ${err?.message || 'Error internal'}`;
-          trackSentBotText(errText);
-          const res = await sock.sendMessage(remoteJid, { text: errText });
-          trackSentBotMsgId(res?.key?.id);
         }
       }
     });
