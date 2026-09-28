@@ -214,16 +214,37 @@ export default function ContactManager() {
   };
 
   const handleImportAllWaContacts = async () => {
-    if (waContacts.length === 0) {
-      alert('Tidak ada kontak WhatsApp yang terdeteksi');
+    let listToImport = waContacts;
+
+    // If waContacts is empty, try to resync on the fly
+    if (listToImport.length === 0) {
+      setImportingWa(true);
+      setImportProgress('⏳ Mengambil & menyinkronkan kontak dari WhatsApp...');
+      try {
+        const res = await fetch('/api/wa/contacts?action=resync');
+        const data = await res.json();
+        if (data?.contacts && Array.isArray(data.contacts) && data.contacts.length > 0) {
+          listToImport = data.contacts;
+          setWaContacts(data.contacts);
+        }
+      } catch (e) {
+        // ignore resync error fallback
+      } finally {
+        setImportingWa(false);
+        setImportProgress(null);
+      }
+    }
+
+    if (listToImport.length === 0) {
+      alert('Tidak ada kontak WhatsApp yang terdeteksi. Pastikan WhatsApp sudah terhubung di Dashboard utama.');
       return;
     }
 
     setImportingWa(true);
-    setImportProgress(`Menyimpan ${waContacts.length} kontak WhatsApp ke buku telepon...`);
+    setImportProgress(`Menyimpan ${listToImport.length} kontak WhatsApp ke buku telepon...`);
     try {
       const targetTag = customImportTag.trim() || 'Kontak WhatsApp';
-      const contactsToSave = waContacts.map((c) => ({
+      const contactsToSave = listToImport.map((c) => ({
         phone: c.phone,
         name: c.name || 'Kontak WA',
         group: targetTag,
@@ -238,7 +259,7 @@ export default function ContactManager() {
       const saveData = await saveRes.json();
       if (!saveRes.ok) throw new Error(saveData.error || 'Gagal menyimpan kontak');
 
-      setSuccess(`✅ ${saveData.count || waContacts.length} kontak WhatsApp berhasil diimpor!`);
+      setSuccess(`✅ ${saveData.count || listToImport.length} kontak WhatsApp berhasil diimpor!`);
       setShowWaImportModal(false);
       fetchContacts();
       setTimeout(() => setSuccess(null), 4000);
@@ -846,17 +867,47 @@ export default function ContactManager() {
               </div>
             ) : (
               <div style={{ background: 'var(--bg-input)', padding: 14, borderRadius: 'var(--radius-md)', border: '1px solid var(--border-subtle)', marginBottom: 16 }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                  <div style={{ fontSize: '1.8rem' }}>📱</div>
-                  <div>
-                    <div style={{ fontWeight: 600, fontSize: '0.9rem', color: 'var(--wa-emerald)' }}>
-                      Impor Seluruh Kontak Buku Telepon WhatsApp
-                    </div>
-                    <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginTop: 2 }}>
-                      {waContacts.length} kontak terdeteksi di akun WhatsApp Anda akan disalin otomatis ke buku telepon aplikasi.
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                    <div style={{ fontSize: '1.8rem' }}>📱</div>
+                    <div>
+                      <div style={{ fontWeight: 600, fontSize: '0.9rem', color: 'var(--wa-emerald)' }}>
+                        Impor Seluruh Kontak Buku Telepon WhatsApp
+                      </div>
+                      <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginTop: 2 }}>
+                        {waContacts.length} kontak terdeteksi di akun WhatsApp Anda akan disalin otomatis ke buku telepon aplikasi.
+                      </div>
                     </div>
                   </div>
+                  <button
+                    type="button"
+                    className="btn btn-secondary btn-sm"
+                    style={{ padding: '6px 12px', fontSize: '0.78rem', whiteSpace: 'nowrap' }}
+                    onClick={async () => {
+                      setLoadingWaContacts(true);
+                      try {
+                        const res = await fetch('/api/wa/contacts?action=resync');
+                        const data = await res.json();
+                        if (data?.contacts) {
+                          setWaContacts(data.contacts);
+                        }
+                      } catch (err) {
+                        console.error('Resync failed:', err);
+                      } finally {
+                        setLoadingWaContacts(false);
+                      }
+                    }}
+                    disabled={loadingWaContacts}
+                  >
+                    {loadingWaContacts ? '⏳ Menyinkronkan...' : '🔄 Sinkronkan Kontak'}
+                  </button>
                 </div>
+
+                {waContacts.length === 0 && (
+                  <div style={{ padding: '10px 12px', borderRadius: 'var(--radius-sm)', background: 'rgba(234, 179, 8, 0.1)', border: '1px solid rgba(234, 179, 8, 0.25)', fontSize: '0.8rem', color: '#facc15', marginTop: 10 }}>
+                    💡 Kontak belum terdeteksi? Klik tombol <strong>🔄 Sinkronkan Kontak</strong> di atas untuk mengambil semua kontak & peserta grup dari WhatsApp secara otomatis.
+                  </div>
+                )}
               </div>
             )}
 

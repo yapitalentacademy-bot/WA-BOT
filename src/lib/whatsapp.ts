@@ -218,8 +218,8 @@ export function cleanPhoneNumber(phone: string): string {
   } else if (clean.startsWith('8')) {
     clean = '62' + clean;
   }
-  // Validate real phone number digit length (8 to 13 digits)
-  if (clean.length < 8 || clean.length > 13) {
+  // Validate real phone number digit length (8 to 15 digits as per E.164 standard)
+  if (clean.length < 8 || clean.length > 15) {
     return '';
   }
   return clean;
@@ -880,7 +880,7 @@ export async function getWhatsAppContacts(preferredAccountId?: string): Promise<
           if (Array.isArray(g.participants)) {
             for (const p of g.participants) {
               const info = resolveParticipantInfo(acc, p, groupName);
-              if (info.phone && info.phone.length >= 8 && info.phone.length <= 13 && !seenPhones.has(info.phone)) {
+              if (info.phone && info.phone.length >= 8 && info.phone.length <= 15 && !seenPhones.has(info.phone)) {
                 seenPhones.add(info.phone);
                 results.push({
                   id: info.id,
@@ -901,59 +901,51 @@ export async function getWhatsAppContacts(preferredAccountId?: string): Promise<
   return results;
 }
 
-// Re-sync contacts for an account
+// Re-sync contacts for connected account(s)
 export async function resyncWhatsAppContacts(accountId?: string): Promise<{ success: boolean; count: number; message: string }> {
-  const targetAccId = accountId || 'acc_1';
-  const acc = state.accounts.get(targetAccId);
-  if (!acc) {
-    throw new Error(`Akun ${targetAccId} tidak ditemukan.`);
-  }
+  const allAccounts = Array.from(state.accounts.values());
+  const targets = accountId
+    ? allAccounts.filter((a) => a.id === accountId)
+    : allAccounts.filter((a) => a.status === 'connected');
 
-  if (acc.status !== 'connected' || !acc.socket) {
-    const count = new Set(Array.from(acc.contactsMap.values()).map((c) => c.phone || c.id)).size;
-    return {
-      success: true,
-      count,
-      message: `Akun ${acc.label} belum terhubung ke WhatsApp. Menampilkan ${count} kontak dari memori disk.`,
-    };
-  }
+  const activeTargets = targets.length > 0 ? targets : allAccounts;
 
-  try {
-    const groups = await acc.socket.groupFetchAllParticipating();
-    let updatedCount = 0;
-    for (const g of Object.values(groups) as any[]) {
-      const groupName = g.subject || 'Grup WA';
-      if (Array.isArray(g.participants)) {
-        for (const p of g.participants) {
-          const info = resolveParticipantInfo(acc, p, groupName);
-          if (info.phone) {
-            const jid = `${info.phone}@s.whatsapp.net`;
-            const existing = acc.contactsMap.get(jid) || acc.contactsMap.get(info.phone);
-            const nama = info.name && !info.name.startsWith('Peserta ') && !info.name.startsWith('Anggota ') ? info.name : existing?.name || `+${info.phone}`;
-            const item = { id: jid, phone: info.phone, name: nama, lid: p.lid || existing?.lid };
-            acc.contactsMap.set(jid, item);
-            acc.contactsMap.set(info.phone, item);
-            if (p.lid) acc.contactsMap.set(p.lid, item);
-            updatedCount++;
+  let totalUpdated = 0;
+  for (const acc of activeTargets) {
+    if (acc.status === 'connected' && acc.socket) {
+      try {
+        const groups = await acc.socket.groupFetchAllParticipating();
+        for (const g of Object.values(groups) as any[]) {
+          const groupName = g.subject || 'Grup WA';
+          if (Array.isArray(g.participants)) {
+            for (const p of g.participants) {
+              const info = resolveParticipantInfo(acc, p, groupName);
+              if (info.phone && info.phone.length >= 8 && info.phone.length <= 15) {
+                const jid = `${info.phone}@s.whatsapp.net`;
+                const existing = acc.contactsMap.get(jid) || acc.contactsMap.get(info.phone);
+                const nama = info.name && !info.name.startsWith('Peserta ') && !info.name.startsWith('Anggota ') ? info.name : existing?.name || `+${info.phone}`;
+                const item = { id: jid, phone: info.phone, name: nama, lid: p.lid || existing?.lid };
+                acc.contactsMap.set(jid, item);
+                acc.contactsMap.set(info.phone, item);
+                if (p.lid) acc.contactsMap.set(p.lid, item);
+                totalUpdated++;
+              }
+            }
           }
         }
+        saveAccountContacts(acc.id, acc.contactsMap);
+      } catch (err) {
+        console.warn(`[MULTI-WA] Error resyncing contacts for ${acc.label}:`, err);
       }
     }
-    saveAccountContacts(acc.id, acc.contactsMap);
-    const totalCount = new Set(Array.from(acc.contactsMap.values()).map((c) => c.phone || c.id)).size;
-    return {
-      success: true,
-      count: totalCount,
-      message: `Sinkronisasi kontak berhasil untuk ${acc.label}! ${totalCount} kontak tersimpan.`,
-    };
-  } catch (err: any) {
-    const totalCount = new Set(Array.from(acc.contactsMap.values()).map((c) => c.phone || c.id)).size;
-    return {
-      success: true,
-      count: totalCount,
-      message: `Kontak dari disk disinkronkan untuk ${acc.label}. Total: ${totalCount} kontak.`,
-    };
   }
+
+  const allContacts = await getWhatsAppContacts(accountId);
+  return {
+    success: true,
+    count: allContacts.length,
+    message: `Sinkronisasi kontak berhasil! ${allContacts.length} kontak terdeteksi dari WhatsApp.`,
+  };
 }
 
 // Fetch Group Participants
